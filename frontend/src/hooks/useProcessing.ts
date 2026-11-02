@@ -27,18 +27,23 @@ const DEBOUNCE_MS = 300
  */
 export function useProcessing(
   file: File | null,
-  { blur_sigma, edge_sensitivity, simplify }: ProcessingParams,
+  params: ProcessingParams,
   debounceMs: number = DEBOUNCE_MS,
 ): ProcessingState {
   const [settled, setSettled] = useState<Settled | null>(null)
-  const key = `${blur_sigma}|${edge_sensitivity}|${simplify}`
+  const { blur_sigma, edge_sensitivity, simplify, fit_tolerance, min_contour_size } = params
+  const key = [blur_sigma, edge_sensitivity, simplify, fit_tolerance, min_contour_size].join('|')
 
   useEffect(() => {
     if (!file) return
     const controller = new AbortController()
 
     const timer = setTimeout(() => {
-      processImage(file, { blur_sigma, edge_sensitivity, simplify }, controller.signal)
+      processImage(
+        file,
+        { blur_sigma, edge_sensitivity, simplify, fit_tolerance, min_contour_size },
+        controller.signal,
+      )
         .then((result) => {
           if (!controller.signal.aborted) setSettled({ file, key, result, error: null })
         })
@@ -59,7 +64,7 @@ export function useProcessing(
       clearTimeout(timer)
       controller.abort()
     }
-  }, [file, key, blur_sigma, edge_sensitivity, simplify, debounceMs])
+  }, [file, key, blur_sigma, edge_sensitivity, simplify, fit_tolerance, min_contour_size, debounceMs])
 
   if (!file) return { status: 'idle', result: null, error: null }
 

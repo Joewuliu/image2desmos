@@ -51,5 +51,7 @@ export function processImage(
   body.append('blur_sigma', String(params.blur_sigma))
   body.append('edge_sensitivity', String(params.edge_sensitivity))
   body.append('simplify', String(params.simplify))
+  body.append('fit_tolerance', String(params.fit_tolerance))
+  body.append('min_contour_size', String(params.min_contour_size))
   return postForm<ProcessResponse>('/api/process', body, signal)
 }

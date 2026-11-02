@@ -1,13 +1,14 @@
 import { useState } from 'react'
-import { boundsAspect, polygonPoints, viewBoxFromBounds } from '../lib/geometry'
+import { boundsAspect, curvePathData, polygonPoints, viewBoxFromBounds } from '../lib/geometry'
 import type { ImageMetadata, ProcessResponse } from '../lib/types'
 
-type View = 'original' | 'edges' | 'contours'
+type View = 'original' | 'edges' | 'contours' | 'curves'
 
 const TABS: { id: View; label: string }[] = [
   { id: 'original', label: 'Original' },
   { id: 'edges', label: 'Edges' },
   { id: 'contours', label: 'Contours' },
+  { id: 'curves', label: 'Curves' },
 ]
 
 interface ResultViewerProps {
@@ -18,7 +19,7 @@ interface ResultViewerProps {
 }
 
 export function ResultViewer({ previewUrl, metadata, result, busy }: ResultViewerProps) {
-  const [view, setView] = useState<View>('contours')
+  const [view, setView] = useState<View>('curves')
   const available = result !== null
 
   const aspect = result
@@ -59,7 +60,11 @@ export function ResultViewer({ previewUrl, metadata, result, busy }: ResultViewe
             src={previewUrl}
             alt="Uploaded image preview"
             className={`absolute inset-0 size-full object-fill transition-opacity ${
-              view === 'original' ? 'opacity-100' : view === 'contours' ? 'opacity-25' : 'opacity-0'
+              view === 'original'
+                ? 'opacity-100'
+                : view === 'contours' || view === 'curves'
+                  ? 'opacity-25'
+                  : 'opacity-0'
             }`}
           />
 
@@ -86,6 +91,29 @@ export function ResultViewer({ previewUrl, metadata, result, busy }: ResultViewe
                   fill="none"
                   stroke="var(--color-vermilion)"
                   strokeWidth={1.6}
+                  strokeLinejoin="round"
+                  vectorEffect="non-scaling-stroke"
+                />
+              ))}
+            </svg>
+          )}
+
+          {result && view === 'curves' && (
+            <svg
+              role="img"
+              aria-label="Fitted curves"
+              viewBox={viewBoxFromBounds(result.bounds)}
+              preserveAspectRatio="none"
+              className="absolute inset-0 size-full"
+            >
+              {result.curves.map((curve, i) => (
+                <path
+                  key={i}
+                  d={curvePathData(curve)}
+                  fill="none"
+                  stroke="var(--color-curve)"
+                  strokeWidth={1.8}
+                  strokeLinecap="round"
                   strokeLinejoin="round"
                   vectorEffect="non-scaling-stroke"
                 />

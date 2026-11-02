@@ -31,10 +31,47 @@ def test_processes_square_and_returns_contours_and_metadata() -> None:
     assert body["stats"]["point_count"] == sum(len(c) for c in body["contours"])
     assert body["stats"]["canny_low"] < body["stats"]["canny_high"]
     assert body["bounds"] == {"min_x": -10.0, "max_x": 10.0, "min_y": -10.0, "max_y": 10.0}
-    assert body["params"] == {"blur_sigma": 1.0, "edge_sensitivity": 50.0, "simplify": 2.0}
+    assert body["params"] == {
+        "blur_sigma": 1.0,
+        "edge_sensitivity": 50.0,
+        "simplify": 2.0,
+        "fit_tolerance": 1.0,
+        "min_contour_size": 1.0,
+    }
     assert body["edge_image"].startswith("data:image/png;base64,")
     assert body["warnings"] == []
     assert all(len(pt) == 2 for c in body["contours"] for pt in c)
+
+
+def test_returns_curve_segments_with_errors_and_counts() -> None:
+    body = post(synthetic.to_bytes(synthetic.circle_ring())).json()
+    assert body["fit"]["circle_count"] == 2
+    assert body["fit"]["segment_count"] == sum(len(c["segments"]) for c in body["curves"])
+    assert body["fit"]["curve_count"] == len(body["curves"]) == 2
+    assert 0 < body["fit"]["max_error_px"] <= body["fit"]["tolerance_px"]
+    assert body["fit"]["mean_error"] <= body["fit"]["max_error"]
+    seg = body["curves"][0]["segments"][0]
+    assert seg["type"] == "circle" and seg["points"] == []
+    assert seg["radius"] > 0 and len(seg["center"]) == 2 and seg["max_error"] >= 0
+
+
+def test_square_curves_are_lines_and_beziers_with_control_points() -> None:
+    body = post(synthetic.to_bytes(synthetic.square())).json()
+    [curve] = body["curves"]
+    assert curve["closed"] is True
+    for seg in curve["segments"]:
+        assert seg["type"] in {"line", "bezier"}
+        assert len(seg["points"]) == (2 if seg["type"] == "line" else 4)
+    first, last = curve["segments"][0]["points"][0], curve["segments"][-1]["points"][-1]
+    assert first == last  # closed: no gap
+
+
+def test_fit_parameters_are_applied() -> None:
+    data = synthetic.to_bytes(synthetic.circle_ring())
+    body = post(data, fit_tolerance=2.5, min_contour_size=7.5).json()
+    assert body["params"]["fit_tolerance"] == 2.5
+    assert body["params"]["min_contour_size"] == 7.5
+    assert body["fit"]["tolerance_px"] == 2.5
 
 
 def test_jpeg_is_supported() -> None:
@@ -72,7 +109,14 @@ def test_noisy_image_fails_gracefully() -> None:
 
 @pytest.mark.parametrize(
     "fields",
-    [{"blur_sigma": -1}, {"edge_sensitivity": 500}, {"simplify": 99}, {"simplify": "abc"}],
+    [
+        {"blur_sigma": -1},
+        {"edge_sensitivity": 500},
+        {"simplify": 99},
+        {"simplify": "abc"},
+        {"fit_tolerance": 0.1},
+        {"min_contour_size": 50},
+    ],
 )
 def test_out_of_range_parameters_are_rejected(fields: dict[str, object]) -> None:
     response = post(synthetic.to_bytes(synthetic.square()), **fields)

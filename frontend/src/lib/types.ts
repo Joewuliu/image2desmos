@@ -23,12 +23,16 @@ export interface ProcessingParams {
   blur_sigma: number
   edge_sensitivity: number
   simplify: number
+  fit_tolerance: number
+  min_contour_size: number
 }
 
 export const DEFAULT_PARAMS: ProcessingParams = {
   blur_sigma: 1,
   edge_sensitivity: 50,
   simplify: 2,
+  fit_tolerance: 1,
+  min_contour_size: 1,
 }
 
 export interface Bounds {
@@ -52,6 +56,41 @@ export interface ProcessingStats {
   working_height: number
 }
 
+export type SegmentType = 'line' | 'bezier' | 'circle'
+
+/**
+ * line: points = [start, end]; bezier: points = [start, c1, c2, end] (cubic);
+ * circle: center + radius, points empty. Cartesian space, y up.
+ */
+export interface Segment {
+  type: SegmentType
+  points: Point[]
+  center: Point | null
+  radius: number | null
+  max_error: number
+}
+
+export interface Curve {
+  closed: boolean
+  segments: Segment[]
+  max_error: number
+  source_points: number
+}
+
+export interface FitStats {
+  curve_count: number
+  segment_count: number
+  line_count: number
+  bezier_count: number
+  circle_count: number
+  max_error: number
+  mean_error: number
+  max_error_px: number
+  mean_error_px: number
+  tolerance: number
+  tolerance_px: number
+}
+
 export interface ProcessResponse {
   image: ImageMetadata
   params: ProcessingParams
@@ -59,6 +98,9 @@ export interface ProcessResponse {
   bounds: Bounds
   /** Cartesian points (origin at image centre, y up); contours are closed. */
   contours: Point[][]
+  /** Fitted lines, circles and cubic Béziers, one entry per stroke. */
+  curves: Curve[]
+  fit: FitStats
   /** PNG data URL: detected edges as dark lines on white. */
   edge_image: string
   warnings: string[]

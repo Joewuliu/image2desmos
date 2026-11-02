@@ -15,10 +15,13 @@ interface SliderSpec {
   step: number
   low: string
   high: string
+  unit?: string
+  group: 'tracing' | 'fitting'
 }
 
 const SLIDERS: SliderSpec[] = [
   {
+    group: 'tracing',
     key: 'edge_sensitivity',
     label: 'Edge sensitivity',
     hint: 'How faint a line can be and still count as an edge.',
@@ -29,6 +32,7 @@ const SLIDERS: SliderSpec[] = [
     high: 'Faint too',
   },
   {
+    group: 'tracing',
     key: 'blur_sigma',
     label: 'Blur',
     hint: 'Smooths out speckle and paper texture before detecting edges.',
@@ -39,6 +43,7 @@ const SLIDERS: SliderSpec[] = [
     high: 'Smooth',
   },
   {
+    group: 'tracing',
     key: 'simplify',
     label: 'Simplification',
     hint: 'Replaces wiggly outlines with fewer straight segments.',
@@ -48,6 +53,35 @@ const SLIDERS: SliderSpec[] = [
     low: 'Exact',
     high: 'Coarse',
   },
+  {
+    group: 'fitting',
+    key: 'fit_tolerance',
+    label: 'Fitting accuracy',
+    hint: 'How far a curve may stray from the traced outline. Tighter fits need more segments.',
+    min: 0.5,
+    max: 5,
+    step: 0.1,
+    low: 'Precise',
+    high: 'Loose',
+    unit: ' px',
+  },
+  {
+    group: 'fitting',
+    key: 'min_contour_size',
+    label: 'Minimum contour size',
+    hint: 'Drops specks and fragments smaller than this share of the image.',
+    min: 0,
+    max: 20,
+    step: 0.5,
+    low: 'Keep all',
+    high: 'Large only',
+    unit: '%',
+  },
+]
+
+const GROUPS: { id: SliderSpec['group']; title: string }[] = [
+  { id: 'tracing', title: 'Tracing' },
+  { id: 'fitting', title: 'Curve fitting' },
 ]
 
 function Slider({ spec, value, onChange }: { spec: SliderSpec; value: number; onChange: (v: number) => void }) {
@@ -61,6 +95,7 @@ function Slider({ spec, value, onChange }: { spec: SliderSpec; value: number; on
         </label>
         <output htmlFor={id} className="font-mono text-sm text-vermilion-deep tabular-nums">
           {value}
+          {spec.unit}
         </output>
       </div>
       <input
@@ -88,25 +123,31 @@ function Slider({ spec, value, onChange }: { spec: SliderSpec; value: number; on
 export function ProcessingControls({ params, onChange }: ProcessingControlsProps) {
   const isDefault = SLIDERS.every((s) => params[s.key] === DEFAULT_PARAMS[s.key])
   return (
-    <section aria-label="Processing controls" className="space-y-5">
-      <div className="flex items-center justify-between">
-        <p className="font-mono text-xs tracking-wide text-ink-muted uppercase">Tracing</p>
-        <button
-          type="button"
-          disabled={isDefault}
-          onClick={() => onChange(DEFAULT_PARAMS)}
-          className="text-xs font-medium text-ink underline underline-offset-4 hover:text-vermilion-deep disabled:cursor-default disabled:text-ink/30 disabled:no-underline"
-        >
-          Reset
-        </button>
-      </div>
-      {SLIDERS.map((spec) => (
-        <Slider
-          key={spec.key}
-          spec={spec}
-          value={params[spec.key]}
-          onChange={(v) => onChange({ ...params, [spec.key]: v })}
-        />
+    <section aria-label="Processing controls" className="space-y-6">
+      {GROUPS.map((group, index) => (
+        <div key={group.id} className="space-y-5">
+          <div className="flex items-center justify-between">
+            <p className="font-mono text-xs tracking-wide text-ink-muted uppercase">{group.title}</p>
+            {index === 0 && (
+              <button
+                type="button"
+                disabled={isDefault}
+                onClick={() => onChange(DEFAULT_PARAMS)}
+                className="text-xs font-medium text-ink underline underline-offset-4 hover:text-vermilion-deep disabled:cursor-default disabled:text-ink/30 disabled:no-underline"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+          {SLIDERS.filter((spec) => spec.group === group.id).map((spec) => (
+            <Slider
+              key={spec.key}
+              spec={spec}
+              value={params[spec.key]}
+              onChange={(v) => onChange({ ...params, [spec.key]: v })}
+            />
+          ))}
+        </div>
       ))}
     </section>
   )

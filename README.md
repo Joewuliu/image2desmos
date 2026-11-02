@@ -11,14 +11,16 @@ The MVP targets black-and-white line art. Color images and photographs come late
 - Milestone 2 (upload): drag-and-drop upload with preview, validated server-side.
 - Milestone 3 (processing): grayscale, Gaussian blur, Canny edges, contour extraction and simplification, with live controls and an edge/contour preview.
 
-Curve fitting and Desmos integration are not implemented yet.
+- Milestone 4 (curve fitting): contours are fitted with lines, circles and piecewise cubic Bézier curves; a Curves tab previews them over the image.
+
+Desmos integration and export are not implemented yet.
 
 ## Stack
 
 - Frontend: React, TypeScript, Vite, Tailwind CSS, Vitest
 - Backend: Python, FastAPI, pytest
-- Image processing: OpenCV, NumPy, Pillow
-- Planned: SciPy, Desmos Graphing Calculator API
+- Image processing and fitting: OpenCV, NumPy, SciPy, Pillow
+- Planned: Desmos Graphing Calculator API
 
 ## Layout
 
@@ -28,6 +30,7 @@ image2desmos/
 ├── backend/    FastAPI service
 │   ├── app/
 │   │   ├── processing/   pure image-processing functions (no web code)
+│   │   ├── fitting/      lines, circles and Bézier fitting (pure NumPy/SciPy)
 │   │   ├── routers/      HTTP endpoints
 │   │   └── services/     upload reading and validation
 │   └── tests/  pytest suite
@@ -91,14 +94,27 @@ Other scripts: `npm run build`, `npm run lint`, `npm test`.
 | `edge_sensitivity` | 0-100 | 50 | Lower Canny thresholds as it rises |
 | `blur_sigma` | 0-5 | 1 | Gaussian sigma in pixels (0 disables) |
 | `simplify` | 0-10 | 2 | `approxPolyDP` strength, scaled to image size (0 disables) |
+| `fit_tolerance` | 0.5-5 | 1 | Target maximum distance, in pixels, between a fitted curve and the traced outline |
+| `min_contour_size` | 0-20 | 1 | Drop strokes whose longest side is below this percentage of the image's longest side (affects curves only) |
 
 The pipeline is: decode (transparency onto white) -> grayscale -> downscale to at most 1600 px -> Gaussian blur -> Canny -> `findContours` -> drop specks -> `approxPolyDP` -> Cartesian conversion. It is deterministic: the same input and parameters always give the same output.
 
 The response contains `contours`, `stats` (contour and point counts, thresholds used), `bounds`, a real `edge_image` (PNG data URL) and `warnings` (for example `no_contours` for a blank image). Images that would produce more than 60,000 points are rejected with `too_complex`.
 
+### Curve fitting
+
+Curves are fitted to the dense edge trace, not to the simplified polygons. For each stroke:
+
+1. An open edge (a line or arc) is traced out and back by OpenCV, so pixels visited once mark its ends; such strokes stay **open**. Closed edge loops stay **closed**.
+2. A closed stroke that is accurately a full circle (least-squares fit, refined with SciPy) becomes one `circle`.
+3. Otherwise the stroke is cut at sharp corners, so corners are never rounded off.
+4. Each piece becomes a `line` if one is within tolerance, else an adaptive piecewise cubic `bezier` (Schneider's algorithm: least-squares fit, Newton reparameterisation, split at the worst point with a shared tangent).
+
+Segments share end points exactly, so curves have no gaps. `curves[].segments[]` holds `type`, `points` (line: 2 points; Bézier: start, two control points, end) or `center` and `radius` (circle), and `max_error`. `fit` holds the segment counts per type and the maximum and mean error (in units and pixels). Errors are measured against the unsmoothed pixel trace. Fitting uses 65% of `fit_tolerance` to leave room for pixel quantisation, so the reported error normally stays near the requested tolerance. Thick strokes appear as two outlines because Canny finds both edges of a stroke.
+
 ### Coordinate system
 
-Contour points are Cartesian: the origin is the image centre, x points right, y points **up** (the image y axis is flipped), and the longest image side spans 20 units (so x is within -10..10 for landscape images). `bounds` gives the exact rectangle the image covers.
+Contour points are Cartesian: the origin is the image centre, x points right, y points **up** (the image y axis is flipped), and the longest image side spans 20 units (so x is within -10..10 for landscape images). `bounds` gives the exact rectangle the image covers. Fitted curves use the same coordinates.
 
 ## Configuration
 

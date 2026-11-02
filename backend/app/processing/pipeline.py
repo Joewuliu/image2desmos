@@ -7,17 +7,28 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 
+from app.fitting.fitter import fit_stroke, summarize
+from app.fitting.types import FitSummary, FittedCurve
 from app.processing import contours as contour_ops
-from app.processing import coordinates, edges, preprocess
-from app.processing.params import MAX_TOTAL_POINTS, ProcessingParams
+from app.processing import coordinates, edges, preprocess, strokes
+from app.processing.params import (
+    FIT_JITTER_HEADROOM,
+    FIT_WINDOW_FRACTION,
+    FIT_WINDOW_MIN_PX,
+    MAX_FIT_POINTS,
+    MAX_SEGMENTS,
+    MAX_TOTAL_POINTS,
+    ProcessingParams,
+)
 
 
 class TooComplexError(Exception):
     """Raised when the result would exceed the point budget (e.g. noisy input)."""
 
-    def __init__(self, point_count: int) -> None:
-        super().__init__(f"{point_count} points exceeds the {MAX_TOTAL_POINTS} point limit")
-        self.point_count = point_count
+    def __init__(self, count: int, limit: int = MAX_TOTAL_POINTS) -> None:
+        super().__init__(f"{count} exceeds the limit of {limit}")
+        self.count = count
+        self.limit = limit
 
 
 @dataclass(frozen=True)
@@ -32,6 +43,9 @@ class ProcessingResult:
     epsilon_px: float
     edge_pixel_count: int
     edge_map: NDArray[np.uint8]  # 255 where an edge was detected
+    curves: list[FittedCurve] = field(default_factory=list)
+    fit: FitSummary = field(default_factory=FitSummary)
+    fit_tolerance_units: float = 0.0
     warnings: list[str] = field(default_factory=list)
 
     @property
@@ -64,7 +78,17 @@ def process_gray(gray: NDArray[np.uint8], params: ProcessingParams) -> Processin
     if not simplified:
         warnings.append("no_contours")
 
+    curves = _fit_curves(raw, params, width, height)
+    fit = summarize(curves)
+    if fit.segment_count > MAX_SEGMENTS:
+        raise TooComplexError(fit.segment_count, MAX_SEGMENTS)
+    if not curves and "no_contours" not in warnings:
+        warnings.append("no_curves")
+
     return ProcessingResult(
+        curves=curves,
+        fit=fit,
+        fit_tolerance_units=params.fit_tolerance * coordinates.unit_scale(width, height),
         contours=cartesian,
         bounds=coordinates.image_bounds(width, height),
         working_width=width,
@@ -77,6 +101,36 @@ def process_gray(gray: NDArray[np.uint8], params: ProcessingParams) -> Processin
         edge_map=edge_map,
         warnings=warnings,
     )
+
+
+def _fit_curves(
+    raw: list[contour_ops.PixelContour], params: ProcessingParams, width: int, height: int
+) -> list[FittedCurve]:
+    """Fit lines, circles and Béziers to the dense (unsimplified) edge traces."""
+    longest = max(width, height)
+    min_extent = params.min_contour_size / 100.0 * longest
+
+    kept: list[tuple[strokes.PixelPoints, bool]] = []
+    for contour in raw:
+        for pts, closed in strokes.contour_to_strokes(contour):
+            if strokes.stroke_extent(pts) >= max(min_extent, 1.0):
+                kept.append((pts, closed))
+
+    total = sum(len(pts) for pts, _ in kept)
+    if total > MAX_FIT_POINTS:
+        raise TooComplexError(total, MAX_FIT_POINTS)
+
+    scale = coordinates.unit_scale(width, height)
+    full_tolerance = params.fit_tolerance * scale
+    tolerance = full_tolerance * FIT_JITTER_HEADROOM
+    window = max(FIT_WINDOW_MIN_PX, FIT_WINDOW_FRACTION * longest) * scale
+    curves = []
+    for pts, closed in kept:
+        cartesian = coordinates.image_to_cartesian(pts, width, height)
+        curve = fit_stroke(cartesian, closed, tolerance, window, circle_tolerance=full_tolerance)
+        if curve.segments:
+            curves.append(curve)
+    return curves
 
 
 def process_image(data: bytes, params: ProcessingParams) -> ProcessingResult:

@@ -19,6 +19,8 @@ interface ImagePreviewProps {
 const WARNING_TEXT: Record<string, string> = {
   no_contours:
     'No outlines were found. Try raising edge sensitivity or lowering blur — or check that the image has visible lines.',
+  no_curves:
+    'Every outline was smaller than the minimum contour size, so no curves were fitted. Lower the minimum size to keep them.',
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -50,6 +52,7 @@ export function ImagePreview({
   }
 
   const stats = result?.stats
+  const fit = result?.fit
   const warnings = result?.warnings.map((w) => WARNING_TEXT[w]).filter(Boolean) ?? []
 
   return (
@@ -80,7 +83,16 @@ export function ImagePreview({
           <dl className="mt-3 grid grid-cols-2 gap-2" aria-label="Contour statistics">
             <Stat label="Contours" value={stats ? stats.contour_count.toLocaleString() : '—'} />
             <Stat label="Points" value={stats ? stats.point_count.toLocaleString() : '—'} />
+            <Stat label="Segments" value={fit ? fit.segment_count.toLocaleString() : '—'} />
+            <Stat label="Max error" value={fit ? `${fit.max_error_px.toFixed(2)} px` : '—'} />
           </dl>
+          {fit && fit.segment_count > 0 && (
+            <p className="mt-3 text-xs text-ink-muted">
+              {fit.line_count} {fit.line_count === 1 ? 'line' : 'lines'} · {fit.bezier_count}{' '}
+              {fit.bezier_count === 1 ? 'Bézier' : 'Béziers'} · {fit.circle_count}{' '}
+              {fit.circle_count === 1 ? 'circle' : 'circles'} · mean error {fit.mean_error_px.toFixed(2)} px
+            </p>
+          )}
           {metadata && (
             <p className="mt-3 truncate text-xs text-ink-muted" title={metadata.filename}>
               {metadata.filename} · {metadata.width} × {metadata.height} px · {formatBytes(metadata.size_bytes)}
