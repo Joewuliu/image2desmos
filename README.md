@@ -8,13 +8,17 @@ The MVP targets black-and-white line art. Color images and photographs come late
 
 ## Status
 
-Milestone 2 (image upload) is complete: drag-and-drop upload with preview, and a validating `POST /api/upload` endpoint. Image processing, curve fitting and Desmos integration are not implemented yet.
+- Milestone 2 (upload): drag-and-drop upload with preview, validated server-side.
+- Milestone 3 (processing): grayscale, Gaussian blur, Canny edges, contour extraction and simplification, with live controls and an edge/contour preview.
+
+Curve fitting and Desmos integration are not implemented yet.
 
 ## Stack
 
 - Frontend: React, TypeScript, Vite, Tailwind CSS, Vitest
 - Backend: Python, FastAPI, pytest
-- Planned: OpenCV, NumPy, SciPy, Desmos Graphing Calculator API
+- Image processing: OpenCV, NumPy, Pillow
+- Planned: SciPy, Desmos Graphing Calculator API
 
 ## Layout
 
@@ -22,7 +26,10 @@ Milestone 2 (image upload) is complete: drag-and-drop upload with preview, and a
 image2desmos/
 ├── frontend/   React + Vite + TypeScript app
 ├── backend/    FastAPI service
-│   ├── app/    application code
+│   ├── app/
+│   │   ├── processing/   pure image-processing functions (no web code)
+│   │   ├── routers/      HTTP endpoints
+│   │   └── services/     upload reading and validation
 │   └── tests/  pytest suite
 ├── README.md
 └── .gitignore
@@ -76,6 +83,22 @@ Other scripts: `npm run build`, `npm run lint`, `npm test`.
 ## API
 
 `POST /api/upload` accepts `multipart/form-data` with a single `file` field (PNG or JPEG). The format is detected from the file's contents, not its name or declared type. Limits: 10 MB and 25 megapixels. Uploads are validated in memory and never written to disk. On success it returns image metadata (filename, format, dimensions, pixel count, size, alpha). Errors return `{"detail": {"code": "...", "message": "..."}}` with status 400, 413, 415 or 422.
+
+`POST /api/process` takes the same `file` field (same validation and limits) plus optional form fields:
+
+| Field | Range | Default | Meaning |
+| --- | --- | --- | --- |
+| `edge_sensitivity` | 0-100 | 50 | Lower Canny thresholds as it rises |
+| `blur_sigma` | 0-5 | 1 | Gaussian sigma in pixels (0 disables) |
+| `simplify` | 0-10 | 2 | `approxPolyDP` strength, scaled to image size (0 disables) |
+
+The pipeline is: decode (transparency onto white) -> grayscale -> downscale to at most 1600 px -> Gaussian blur -> Canny -> `findContours` -> drop specks -> `approxPolyDP` -> Cartesian conversion. It is deterministic: the same input and parameters always give the same output.
+
+The response contains `contours`, `stats` (contour and point counts, thresholds used), `bounds`, a real `edge_image` (PNG data URL) and `warnings` (for example `no_contours` for a blank image). Images that would produce more than 60,000 points are rejected with `too_complex`.
+
+### Coordinate system
+
+Contour points are Cartesian: the origin is the image centre, x points right, y points **up** (the image y axis is flipped), and the longest image side spans 20 units (so x is within -10..10 for landscape images). `bounds` gives the exact rectangle the image covers.
 
 ## Configuration
 

@@ -7,6 +7,7 @@ export type UploadStatus = 'idle' | 'uploading' | 'success' | 'error'
 
 export interface ImageUploadState {
   status: UploadStatus
+  file: File | null
   previewUrl: string | null
   metadata: ImageMetadata | null
   error: string | null
@@ -17,6 +18,7 @@ export interface ImageUploadState {
 
 export function useImageUpload(): ImageUploadState {
   const [status, setStatus] = useState<UploadStatus>('idle')
+  const [file, setFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [metadata, setMetadata] = useState<ImageMetadata | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -32,6 +34,7 @@ export function useImageUpload(): ImageUploadState {
     abortRef.current?.abort()
     abortRef.current = null
     releaseUrl()
+    setFile(null)
     setPreviewUrl(null)
     setMetadata(null)
     setError(null)
@@ -42,6 +45,7 @@ export function useImageUpload(): ImageUploadState {
     (message: string) => {
       abortRef.current?.abort()
       releaseUrl()
+      setFile(null)
       setPreviewUrl(null)
       setMetadata(null)
       setError(message)
@@ -65,6 +69,7 @@ export function useImageUpload(): ImageUploadState {
       releaseUrl()
       const url = URL.createObjectURL(file)
       urlRef.current = url
+      setFile(file)
       setPreviewUrl(url)
       setMetadata(null)
       setError(null)
@@ -79,6 +84,7 @@ export function useImageUpload(): ImageUploadState {
         .catch((err: unknown) => {
           if (controller.signal.aborted) return
           releaseUrl()
+          setFile(null)
           setPreviewUrl(null)
           setError(err instanceof UploadError ? err.message : 'Something went wrong. Please try again.')
           setStatus('error')
@@ -95,5 +101,5 @@ export function useImageUpload(): ImageUploadState {
     [],
   )
 
-  return { status, previewUrl, metadata, error, select, reset, reportError }
+  return { status, file, previewUrl, metadata, error, select, reset, reportError }
 }

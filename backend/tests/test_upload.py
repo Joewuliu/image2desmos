@@ -92,7 +92,7 @@ def test_missing_file_field_is_rejected() -> None:
 
 
 def test_oversized_file_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("app.routers.upload.MAX_UPLOAD_BYTES", 1024)
+    monkeypatch.setattr("app.services.upload_reader.MAX_UPLOAD_BYTES", 1024)
     response = post(os.urandom(4096))
     assert response.status_code == 413
     assert error_code(response) == "file_too_large"
@@ -100,7 +100,7 @@ def test_oversized_file_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_file_exactly_at_limit_passes_size_check(monkeypatch: pytest.MonkeyPatch) -> None:
     data = make_image("PNG")
-    monkeypatch.setattr("app.routers.upload.MAX_UPLOAD_BYTES", len(data))
+    monkeypatch.setattr("app.services.upload_reader.MAX_UPLOAD_BYTES", len(data))
     monkeypatch.setattr("app.services.image_validation.MAX_UPLOAD_BYTES", len(data))
     assert post(data).status_code == 200
 

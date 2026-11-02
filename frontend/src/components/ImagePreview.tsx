@@ -1,17 +1,47 @@
 import { useRef, type ChangeEvent } from 'react'
-import { formatBytes, formatMegapixels } from '../lib/format'
-import type { ImageMetadata } from '../lib/types'
+import type { ProcessingState } from '../hooks/useProcessing'
+import { formatBytes } from '../lib/format'
+import type { ImageMetadata, ProcessingParams } from '../lib/types'
+import { ProcessingControls } from './ProcessingControls'
+import { ResultViewer } from './ResultViewer'
 
 interface ImagePreviewProps {
   previewUrl: string
   metadata: ImageMetadata | null
   uploading: boolean
+  processing: ProcessingState
+  params: ProcessingParams
+  onParamsChange: (params: ProcessingParams) => void
   onReplace: (file: File) => void
   onRemove: () => void
 }
 
-export function ImagePreview({ previewUrl, metadata, uploading, onReplace, onRemove }: ImagePreviewProps) {
+const WARNING_TEXT: Record<string, string> = {
+  no_contours:
+    'No outlines were found. Try raising edge sensitivity or lowering blur — or check that the image has visible lines.',
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg bg-paper px-3 py-2.5">
+      <dd className="font-display text-2xl text-ink tabular-nums">{value}</dd>
+      <dt className="font-mono text-[11px] tracking-wide text-ink-muted uppercase">{label}</dt>
+    </div>
+  )
+}
+
+export function ImagePreview({
+  previewUrl,
+  metadata,
+  uploading,
+  processing,
+  params,
+  onParamsChange,
+  onReplace,
+  onRemove,
+}: ImagePreviewProps) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const { result, status, error } = processing
 
   const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -19,54 +49,46 @@ export function ImagePreview({ previewUrl, metadata, uploading, onReplace, onRem
     if (file) onReplace(file)
   }
 
-  const rows: [string, string][] = metadata
-    ? [
-        ['File', metadata.filename],
-        ['Format', metadata.format],
-        ['Dimensions', `${metadata.width} × ${metadata.height} px`],
-        ['Resolution', formatMegapixels(metadata.pixel_count)],
-        ['Size', formatBytes(metadata.size_bytes)],
-        ['Transparency', metadata.has_alpha ? 'Yes' : 'No'],
-      ]
-    : []
+  const stats = result?.stats
+  const warnings = result?.warnings.map((w) => WARNING_TEXT[w]).filter(Boolean) ?? []
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
-      <div className="checkerboard relative flex min-h-72 items-center justify-center overflow-hidden rounded-2xl border border-ink/15 p-4">
-        <img
-          src={previewUrl}
-          alt="Uploaded image preview"
-          className={`max-h-[28rem] w-auto max-w-full object-contain transition-opacity ${uploading ? 'opacity-50' : ''}`}
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+      <div>
+        <ResultViewer
+          previewUrl={previewUrl}
+          metadata={metadata}
+          result={result}
+          busy={uploading || status === 'processing'}
         />
-        {uploading && (
-          <div
-            role="status"
-            className="absolute inset-x-0 bottom-4 mx-auto flex w-fit items-center gap-2 rounded-full bg-ink px-4 py-2 text-sm text-paper"
-          >
-            <span className="size-3.5 animate-spin rounded-full border-2 border-paper/30 border-t-paper" />
-            Checking image…
-          </div>
+        {error && (
+          <p role="alert" className="mt-4 rounded-lg border border-vermilion/30 bg-vermilion/8 px-4 py-3 text-sm text-vermilion-deep">
+            {error}
+          </p>
         )}
+        {!error &&
+          warnings.map((text) => (
+            <p key={text} role="status" className="mt-4 rounded-lg border border-ink/15 bg-paper-raised px-4 py-3 text-sm text-ink-muted">
+              {text}
+            </p>
+          ))}
       </div>
 
-      <div className="flex flex-col justify-between gap-6 rounded-2xl border border-ink/15 bg-paper-raised p-6">
+      <div className="flex flex-col gap-6 rounded-2xl border border-ink/15 bg-paper-raised p-6">
         <div>
-          <p className="font-mono text-xs tracking-wide text-ink-muted uppercase">Image details</p>
-          {metadata ? (
-            <dl className="mt-4 divide-y divide-ink/10 text-sm">
-              {rows.map(([label, value]) => (
-                <div key={label} className="flex items-baseline justify-between gap-4 py-2.5">
-                  <dt className="text-ink-muted">{label}</dt>
-                  <dd className="min-w-0 truncate text-right font-medium text-ink" title={value}>
-                    {value}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          ) : (
-            <p className="mt-4 text-sm text-ink-muted">Reading file…</p>
+          <p className="font-mono text-xs tracking-wide text-ink-muted uppercase">Result</p>
+          <dl className="mt-3 grid grid-cols-2 gap-2" aria-label="Contour statistics">
+            <Stat label="Contours" value={stats ? stats.contour_count.toLocaleString() : '—'} />
+            <Stat label="Points" value={stats ? stats.point_count.toLocaleString() : '—'} />
+          </dl>
+          {metadata && (
+            <p className="mt-3 truncate text-xs text-ink-muted" title={metadata.filename}>
+              {metadata.filename} · {metadata.width} × {metadata.height} px · {formatBytes(metadata.size_bytes)}
+            </p>
           )}
         </div>
+
+        <ProcessingControls params={params} onChange={onParamsChange} />
 
         <div className="flex gap-3">
           <input

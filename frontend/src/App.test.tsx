@@ -1,8 +1,8 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
-import type { ImageMetadata } from './lib/types'
+import type { ImageMetadata, ProcessResponse } from './lib/types'
 
 const metadata: ImageMetadata = {
   filename: 'sketch.png',
@@ -15,12 +15,52 @@ const metadata: ImageMetadata = {
   has_alpha: false,
 }
 
+const processed: ProcessResponse = {
+  image: metadata,
+  params: { blur_sigma: 1, edge_sensitivity: 50, simplify: 2 },
+  stats: {
+    contour_count: 2,
+    point_count: 7,
+    edge_pixel_count: 900,
+    canny_low: 56,
+    canny_high: 142,
+    blur_kernel: 7,
+    epsilon_px: 1.28,
+    working_width: 640,
+    working_height: 480,
+  },
+  bounds: { min_x: -10, max_x: 10, min_y: -7.5, max_y: 7.5 },
+  contours: [
+    [
+      [-5, 5],
+      [5, 5],
+      [5, -5],
+      [-5, -5],
+    ],
+    [
+      [0, 1],
+      [1, 0],
+      [-1, 0],
+    ],
+  ],
+  edge_image: 'data:image/png;base64,AAAA',
+  warnings: [],
+}
+
 const png = () => new File([new Uint8Array(8)], 'sketch.png', { type: 'image/png' })
 
+type Handler = (body: FormData) => Response | Promise<Response>
+let onUpload: Handler
+let onProcess: Handler
 let fetchMock: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
-  fetchMock = vi.fn(() => Promise.resolve(Response.json(metadata)))
+  onUpload = () => Response.json(metadata)
+  onProcess = () => Response.json(processed)
+  fetchMock = vi.fn((url: string, init: RequestInit) => {
+    const body = init.body as FormData
+    return Promise.resolve(url.endsWith('/api/process') ? onProcess(body) : onUpload(body))
+  })
   vi.stubGlobal('fetch', fetchMock)
   URL.createObjectURL = vi.fn(() => 'blob:preview')
   URL.revokeObjectURL = vi.fn()
@@ -29,6 +69,9 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals()
 })
+
+const callsTo = (path: string) =>
+  fetchMock.mock.calls.filter(([url]) => (url as string).endsWith(path))
 
 function fileInput(): HTMLInputElement {
   return screen.getByLabelText(/drop a line drawing/i, { selector: 'input' }) as HTMLInputElement
@@ -39,38 +82,29 @@ async function uploadViaInput(file: File) {
   await user.upload(fileInput(), file)
 }
 
+const dropzone = () => screen.getByText(/drop a line drawing here/i).closest('label')!
+
 describe('upload UI', () => {
   it('starts with an empty dropzone', () => {
     render(<App />)
-    expect(screen.getByText(/drop a line drawing here/i)).toBeInTheDocument()
+    expect(dropzone()).toBeInTheDocument()
     expect(screen.queryByRole('img')).not.toBeInTheDocument()
   })
 
-  it('uploads a file, shows the preview and metadata', async () => {
+  it('uploads a dropped file and shows the preview', async () => {
     render(<App />)
-    await uploadViaInput(png())
+    fireEvent.drop(dropzone(), { dataTransfer: { files: [png()] } })
 
-    expect(await screen.findByText('640 × 480 px')).toBeInTheDocument()
+    expect(await screen.findByText(/640 × 480 px/)).toBeInTheDocument()
     expect(screen.getByRole('img', { name: /uploaded image preview/i })).toHaveAttribute(
       'src',
       'blob:preview',
     )
-    expect(screen.getByText('sketch.png')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledOnce()
-  })
-
-  it('uploads a dropped file', async () => {
-    render(<App />)
-    const zone = screen.getByText(/drop a line drawing here/i).closest('label')!
-    fireEvent.drop(zone, { dataTransfer: { files: [png()] } })
-
-    expect(await screen.findByText('640 × 480 px')).toBeInTheDocument()
   })
 
   it('rejects unsupported types without calling the server', async () => {
     render(<App />)
-    const zone = screen.getByText(/drop a line drawing here/i).closest('label')!
-    fireEvent.drop(zone, {
+    fireEvent.drop(dropzone(), {
       dataTransfer: { files: [new File(['x'], 'anim.gif', { type: 'image/gif' })] },
     })
 
@@ -89,26 +123,25 @@ describe('upload UI', () => {
 
   it('rejects multiple dropped files', async () => {
     render(<App />)
-    const zone = screen.getByText(/drop a line drawing here/i).closest('label')!
-    fireEvent.drop(zone, { dataTransfer: { files: [png(), png()] } })
+    fireEvent.drop(dropzone(), { dataTransfer: { files: [png(), png()] } })
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/one image at a time/i)
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('shows the server error and returns to the dropzone', async () => {
-    fetchMock.mockResolvedValueOnce(
+  it('shows the server error, skips processing, and returns to the dropzone', async () => {
+    onUpload = () =>
       Response.json(
         { detail: { code: 'invalid_image', message: 'The file is not a valid PNG or JPEG image.' } },
         { status: 400 },
-      ),
-    )
+      )
     render(<App />)
     await uploadViaInput(png())
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/not a valid png or jpeg/i)
-    expect(screen.getByText(/drop a line drawing here/i)).toBeInTheDocument()
+    expect(dropzone()).toBeInTheDocument()
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview')
+    expect(callsTo('/api/process')).toHaveLength(0)
   })
 
   it('shows a friendly message when the server is unreachable', async () => {
@@ -123,11 +156,11 @@ describe('upload UI', () => {
     const user = userEvent.setup()
     render(<App />)
     await uploadViaInput(png())
-    await screen.findByText('640 × 480 px')
+    await screen.findByText(/640 × 480 px/)
 
     await user.click(screen.getByRole('button', { name: /remove/i }))
 
-    expect(screen.getByText(/drop a line drawing here/i)).toBeInTheDocument()
+    expect(dropzone()).toBeInTheDocument()
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview')
   })
 
@@ -135,12 +168,113 @@ describe('upload UI', () => {
     const user = userEvent.setup()
     render(<App />)
     await uploadViaInput(png())
-    await screen.findByText('640 × 480 px')
+    await screen.findByText(/640 × 480 px/)
 
-    fetchMock.mockResolvedValueOnce(Response.json({ ...metadata, filename: 'second.png', width: 100 }))
+    onUpload = () => Response.json({ ...metadata, filename: 'second.png', width: 100 })
     await user.upload(screen.getByTestId('replace-input'), png())
 
-    await waitFor(() => expect(screen.getByText('100 × 480 px')).toBeInTheDocument())
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(await screen.findByText(/second\.png · 100 × 480 px/)).toBeInTheDocument()
+    expect(callsTo('/api/upload')).toHaveLength(2)
+  })
+})
+
+describe('processing UI', () => {
+  it('processes the uploaded file and shows contour and point counts', async () => {
+    render(<App />)
+    await uploadViaInput(png())
+
+    const stats = await screen.findByLabelText('Contour statistics')
+    await waitFor(() => expect(within(stats).getByText('7')).toBeInTheDocument())
+    expect(within(stats).getByText('2')).toBeInTheDocument()
+
+    const [, init] = callsTo('/api/process')[0] as [string, RequestInit]
+    const form = init.body as FormData
+    expect(form.get('file')).toBeInstanceOf(File)
+    expect(form.get('blur_sigma')).toBe('1')
+    expect(form.get('edge_sensitivity')).toBe('50')
+    expect(form.get('simplify')).toBe('2')
+  })
+
+  it('draws the returned contours as an SVG overlay with the Cartesian viewBox', async () => {
+    render(<App />)
+    await uploadViaInput(png())
+
+    const overlay = await screen.findByRole('img', { name: /extracted contours/i })
+    expect(overlay).toHaveAttribute('viewBox', '-10 -7.5 20 15')
+    const polygons = overlay.querySelectorAll('polygon')
+    expect(polygons).toHaveLength(2)
+    // y is negated for SVG: Cartesian (-5, 5) -> SVG (-5, -5).
+    expect(polygons[0]).toHaveAttribute('points', '-5,-5 5,-5 5,5 -5,5')
+  })
+
+  it('shows the real edge image on the Edges tab', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await uploadViaInput(png())
+    await screen.findByRole('img', { name: /extracted contours/i })
+
+    await user.click(screen.getByRole('tab', { name: 'Edges' }))
+    expect(screen.getByRole('img', { name: /detected edges/i })).toHaveAttribute(
+      'src',
+      processed.edge_image,
+    )
+  })
+
+  it('re-processes with new parameters when a slider moves', async () => {
+    render(<App />)
+    await uploadViaInput(png())
+    await screen.findByRole('img', { name: /extracted contours/i })
+
+    fireEvent.change(screen.getByLabelText('Edge sensitivity'), { target: { value: '80' } })
+    fireEvent.change(screen.getByLabelText('Blur'), { target: { value: '2.5' } })
+    fireEvent.change(screen.getByLabelText('Simplification'), { target: { value: '6' } })
+
+    await waitFor(() => expect(callsTo('/api/process')).toHaveLength(2), { timeout: 2000 })
+    const form = (callsTo('/api/process')[1][1] as RequestInit).body as FormData
+    expect(form.get('edge_sensitivity')).toBe('80')
+    expect(form.get('blur_sigma')).toBe('2.5')
+    expect(form.get('simplify')).toBe('6')
+  })
+
+  it('resets sliders to defaults', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await uploadViaInput(png())
+    await screen.findByRole('img', { name: /extracted contours/i })
+
+    const slider = screen.getByLabelText('Blur')
+    fireEvent.change(slider, { target: { value: '4' } })
+    expect(slider).toHaveValue('4')
+    await user.click(screen.getByRole('button', { name: 'Reset' }))
+    expect(slider).toHaveValue('1')
+  })
+
+  it('explains a blank result instead of failing', async () => {
+    onProcess = () =>
+      Response.json({
+        ...processed,
+        contours: [],
+        stats: { ...processed.stats, contour_count: 0, point_count: 0 },
+        warnings: ['no_contours'],
+      })
+    render(<App />)
+    await uploadViaInput(png())
+
+    expect(await screen.findByText(/no outlines were found/i)).toBeInTheDocument()
+  })
+
+  it('shows processing errors without discarding the image or controls', async () => {
+    onProcess = () =>
+      Response.json(
+        { detail: { code: 'too_complex', message: 'This image produces too many contour points.' } },
+        { status: 422 },
+      )
+    render(<App />)
+    await uploadViaInput(png())
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/too many contour points/i)
+    expect(screen.getByRole('img', { name: /uploaded image preview/i })).toBeInTheDocument()
+    expect(screen.getByLabelText('Blur')).toBeEnabled()
+    expect(screen.getByRole('tab', { name: 'Edges' })).toBeDisabled()
   })
 })
