@@ -8,7 +8,7 @@ The MVP targets black-and-white line art. Color images and photographs come late
 
 ## Status
 
-Project scaffolding only. Upload, image processing, curve fitting and Desmos integration are not implemented yet.
+Milestone 2 (image upload) is complete: drag-and-drop upload with preview, and a validating `POST /api/upload` endpoint. Image processing, curve fitting and Desmos integration are not implemented yet.
 
 ## Stack
 
@@ -44,7 +44,7 @@ cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements-dev.txt
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload --port 8001
 ```
 
 macOS / Linux:
@@ -54,10 +54,10 @@ cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload --port 8001
 ```
 
-Check it: <http://localhost:8000/health> returns `{"status":"ok"}`. Interactive docs are at <http://localhost:8000/docs>.
+Check it: <http://localhost:8001/health> returns `{"status":"ok"}`. Interactive docs are at <http://localhost:8001/docs>.
 
 Run tests (venv active): `pytest`
 
@@ -73,6 +73,12 @@ The app runs at <http://localhost:5173>.
 
 Other scripts: `npm run build`, `npm run lint`, `npm test`.
 
+## API
+
+`POST /api/upload` accepts `multipart/form-data` with a single `file` field (PNG or JPEG). The format is detected from the file's contents, not its name or declared type. Limits: 10 MB and 25 megapixels. Uploads are validated in memory and never written to disk. On success it returns image metadata (filename, format, dimensions, pixel count, size, alpha). Errors return `{"detail": {"code": "...", "message": "..."}}` with status 400, 413, 415 or 422.
+
 ## Configuration
+
+The frontend reads the API address from `VITE_API_URL` (default `http://localhost:8001`). To override it, copy `frontend/.env.example` to `frontend/.env.local`.
 
 The backend allows CORS requests from `http://localhost:5173` and `http://127.0.0.1:5173`. Edit `ALLOWED_ORIGINS` in `backend/app/main.py` to change this. Never commit `.env` files.
