@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { boundsAspect, curvePathData, polygonPoints, viewBoxFromBounds } from '../lib/geometry'
+import { DESMOS_API_KEY } from '../lib/config'
 import { DesmosGraph } from './DesmosGraph'
 import { EquationsPanel } from './EquationsPanel'
+import { ExportPanel } from './ExportPanel'
 import type { ImageMetadata, ProcessResponse } from '../lib/types'
 
 type View = 'original' | 'edges' | 'contours' | 'curves' | 'graph' | 'equations'
@@ -25,6 +27,8 @@ interface ResultViewerProps {
 export function ResultViewer({ previewUrl, metadata, result, busy }: ResultViewerProps) {
   const [view, setView] = useState<View>('curves')
   const available = result !== null
+  const [calculator, setCalculator] = useState<DesmosCalculator | null>(null)
+  const [restoreKey, setRestoreKey] = useState(0)
 
   const aspect = result
     ? boundsAspect(result.bounds)
@@ -56,7 +60,12 @@ export function ResultViewer({ previewUrl, metadata, result, busy }: ResultViewe
       </div>
 
       {result && view === 'graph' && (
-        <DesmosGraph expressions={result.desmos.expressions} bounds={result.bounds} />
+        <DesmosGraph
+          expressions={result.desmos.expressions}
+          bounds={result.bounds}
+          onCalculator={setCalculator}
+          restoreKey={restoreKey}
+        />
       )}
       {result && view === 'equations' && <EquationsPanel desmos={result.desmos} />}
 
@@ -143,6 +152,17 @@ export function ResultViewer({ previewUrl, metadata, result, busy }: ResultViewe
           </div>
         )}
       </div>
+
+      {result && (
+        <ExportPanel
+          desmos={result.desmos}
+          sourceName={result.image.filename}
+          hasApiKey={DESMOS_API_KEY !== ''}
+          calculator={calculator}
+          onNeedGraph={() => setView('graph')}
+          onRestore={() => setRestoreKey((n) => n + 1)}
+        />
+      )}
     </div>
   )
 }

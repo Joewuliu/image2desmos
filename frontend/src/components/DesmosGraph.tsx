@@ -11,6 +11,10 @@ interface DesmosGraphProps {
   expressions: readonly DesmosExpression[]
   bounds: Bounds
   apiKey?: string
+  /** Called with the live calculator once it is drawn, and with null when it is torn down. */
+  onCalculator?: (calculator: DesmosCalculator | null) => void
+  /** Bump to redraw the generated equations (discarding an imported state). */
+  restoreKey?: number
 }
 
 function Notice({ children }: { children: React.ReactNode }) {
@@ -21,7 +25,17 @@ function Notice({ children }: { children: React.ReactNode }) {
   )
 }
 
-export function DesmosGraph({ expressions, bounds, apiKey = DESMOS_API_KEY }: DesmosGraphProps) {
+export function DesmosGraph({
+  expressions,
+  bounds,
+  apiKey = DESMOS_API_KEY,
+  onCalculator,
+  restoreKey = 0,
+}: DesmosGraphProps) {
+  const onCalculatorRef = useRef(onCalculator)
+  useEffect(() => {
+    onCalculatorRef.current = onCalculator
+  }, [onCalculator])
   const hostRef = useRef<HTMLDivElement>(null)
   const calculatorRef = useRef<DesmosCalculator | null>(null)
   const [ready, setReady] = useState(false)
@@ -68,6 +82,7 @@ export function DesmosGraph({ expressions, bounds, apiKey = DESMOS_API_KEY }: De
       cancelled = true
       created?.destroy()
       calculatorRef.current = null
+      onCalculatorRef.current?.(null)
       setReady(false)
     }
   }, [canRender, apiKey, attempt])
@@ -81,7 +96,8 @@ export function DesmosGraph({ expressions, bounds, apiKey = DESMOS_API_KEY }: De
       expressions.map((e) => ({ id: e.id, latex: e.latex, color: CURVE_COLOR })),
     )
     fitView()
-  }, [status, expressions, fitView])
+    onCalculatorRef.current?.(calculator)
+  }, [status, expressions, fitView, restoreKey])
 
   if (apiKey === '') {
     return (

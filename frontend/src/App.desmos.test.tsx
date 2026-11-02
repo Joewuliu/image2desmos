@@ -299,7 +299,7 @@ describe('Desmos tab', () => {
     render(<App />)
     const user = await uploadAndOpen('Desmos')
 
-    expect(screen.getByText(/1,600 expressions/)).toBeInTheDocument()
+    expect(screen.getByText(/has 1,600 expressions\./)).toBeInTheDocument()
     expect(loadDesmos).not.toHaveBeenCalled()
 
     await user.click(screen.getByRole('button', { name: 'Render anyway' }))

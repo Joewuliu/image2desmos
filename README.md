@@ -15,7 +15,9 @@ The MVP targets black-and-white line art. Color images and photographs come late
 
 - Milestone 5 (Desmos): every fitted segment is serialised to a Desmos expression, plotted live in an embedded Desmos Graphing Calculator and listed (with copy) in an Equations tab.
 
-Export and graph-link generation are not implemented yet.
+- Milestone 6A (export): download the expressions as `.txt`, export and re-import the Desmos calculator state as JSON, and save a PNG of the graph.
+
+Graph-link generation and native Desmos file import are not implemented.
 
 ## Stack
 
@@ -130,6 +132,21 @@ Segments with zero length or non-finite values are skipped, not emitted. They ar
 ### Coordinate system
 
 Contour points are Cartesian: the origin is the image centre, x points right, y points **up** (the image y axis is flipped), and the longest image side spans 20 units (so x is within -10..10 for landscape images). `bounds` gives the exact rectangle the image covers. Fitted curves use the same coordinates.
+
+## Exporting
+
+The Export section appears under the preview once a result exists.
+
+| Export | Needs the Desmos key | What it is |
+| --- | --- | --- |
+| Expressions `.txt` | no | Every equation as Desmos LaTeX, one per line, to paste into a Desmos graph. |
+| Desmos state `.json` | yes | The output of the Desmos API's `getState()`. A backup you can re-import into Image2Desmos. |
+| Import state `.json` | yes | Validates the file, then calls `setState()`. "Restore generated graph" returns to the computed equations. |
+| Graph image `.png` | yes | A screenshot of the Desmos graph (`asyncScreenshot`, 2x resolution). |
+
+**The state JSON is not a Desmos graph link or a native Desmos file.** Desmos treats states as opaque and has no import for these files on desmos.com. Export and import happen inside this app; use the `.txt` to move equations into the Desmos site. Import checks the file is a JSON object with an `expressions.list` array and is at most 25 MB; Desmos may still reject a state from another calculator version, which is reported as an error.
+
+Actions that need the calculator open the Desmos tab by themselves and run when the graph has drawn. Graphs above 1,500 expressions ask for confirmation before rendering.
 
 ## Desmos API key
 
