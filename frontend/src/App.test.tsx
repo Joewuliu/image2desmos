@@ -4,6 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import type { ImageMetadata, ProcessResponse } from './lib/types'
 
+vi.mock('./lib/config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./lib/config')>()),
+  DESMOS_API_KEY: '',
+}))
+
 const metadata: ImageMetadata = {
   filename: 'sketch.png',
   format: 'PNG',
@@ -188,7 +193,7 @@ describe('upload UI', () => {
     render(<App />)
     await uploadViaInput(png())
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/could not reach the server/i)
+    expect(await screen.findByRole('alert')).toHaveTextContent(/can.t reach its server/i)
   })
 
   it('removes the image and revokes the preview URL', async () => {
@@ -201,6 +206,24 @@ describe('upload UI', () => {
 
     expect(dropzone()).toBeInTheDocument()
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview')
+  })
+
+  it('keeps the current image when a replacement is rejected', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await uploadViaInput(png())
+    await screen.findByText(/sketch\.png · 640 × 480 px/)
+
+    onUpload = () =>
+      Response.json({ detail: { code: 'invalid_image', message: 'The file is not a valid PNG or JPEG image.' } }, { status: 400 })
+    await user.upload(screen.getByTestId('replace-input'), png())
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/not a valid png.*current image is unchanged/i)
+    expect(screen.getByText(/sketch\.png · 640 × 480 px/)).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: /uploaded image preview/i })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Dismiss' }))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
   it('replaces the image with a new upload', async () => {
@@ -252,7 +275,7 @@ describe('processing UI', () => {
 
     const overlay = await screen.findByRole('img', { name: /fitted curves/i })
     expect(overlay).toHaveAttribute('viewBox', '-10 -7.5 20 15')
-    const paths = overlay.querySelectorAll('path')
+    const paths = overlay.querySelectorAll('path[data-curve]')
     expect(paths).toHaveLength(2)
     // Cartesian y is negated for SVG. Closed polyline with one Bézier:
     expect(paths[0]).toHaveAttribute('d', 'M-5,-5L5,-5C6,-3 6,3 5,5L-5,5L-5,-5Z')
@@ -318,7 +341,7 @@ describe('processing UI', () => {
     const slider = screen.getByLabelText('Blur')
     fireEvent.change(slider, { target: { value: '4' } })
     expect(slider).toHaveValue('4')
-    await user.click(screen.getByRole('button', { name: 'Reset' }))
+    await user.click(screen.getByRole('button', { name: 'Reset all' }))
     expect(slider).toHaveValue('1')
   })
 
@@ -334,6 +357,16 @@ describe('processing UI', () => {
     await uploadViaInput(png())
 
     expect(await screen.findByText(/no outlines were found/i)).toBeInTheDocument()
+  })
+
+  it('does not claim to be tracing after a first trace fails', async () => {
+    onProcess = () =>
+      Response.json({ detail: { code: 'too_complex', message: 'Too much detail.' } }, { status: 422 })
+    render(<App />)
+    await uploadViaInput(png())
+
+    expect(await screen.findByText(/the trace didn.t finish/i)).toBeInTheDocument()
+    expect(screen.queryByText('Tracing the image…')).not.toBeInTheDocument()
   })
 
   it('explains when every outline is below the minimum contour size', async () => {

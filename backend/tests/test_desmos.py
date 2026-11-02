@@ -198,6 +198,7 @@ def test_serialize_mixed_curves_in_order_with_ids_and_types() -> None:
     assert [e.type for e in graph.expressions] == ["circle", "line", "bezier"]
     assert [e.id for e in graph.expressions] == ["e1", "e2", "e3"]
     assert [e.curve for e in graph.expressions] == [0, 1, 1]
+    assert [e.segment for e in graph.expressions] == [0, 0, 1]
     assert graph.count == 3 and graph.skipped_count == 0
 
 
@@ -220,6 +221,7 @@ def test_unusable_segments_are_skipped_and_counted_not_emitted() -> None:
     assert graph.skipped == {"degenerate": 3, "invalid_geometry": 1}
     assert graph.skipped_count == 4
     assert graph.expressions[0].id == "e1"  # ids stay consecutive
+    assert graph.expressions[0].segment == 2  # but the segment index stays true
 
 
 def test_empty_input() -> None:

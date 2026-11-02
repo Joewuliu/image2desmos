@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_STATE_BYTES, parseStateText, readStateFile, serializeState } from './stateIO'
+import { MAX_STATE_BYTES, parseStateText, readStateFile, serializeState, stateExpressions } from './stateIO'
 
 const validState = {
   version: 11,
@@ -21,16 +21,16 @@ describe('parseStateText', () => {
   it.each([
     ['empty text', '', /empty/i],
     ['whitespace', '   \n ', /empty/i],
-    ['broken JSON', '{"expressions": ', /not valid json/i],
-    ['plain text', 'hello', /not valid json/i],
-    ['an array', '[1,2,3]', /json object/i],
-    ['null', 'null', /json object/i],
-    ['a number', '42', /json object/i],
-    ['an unrelated object', '{"name":"x"}', /does not look like a desmos/i],
-    ['expressions without a list', '{"expressions":{}}', /does not look like a desmos/i],
-    ['expressions as an array', '{"expressions":[]}', /does not look like a desmos/i],
-    ['a non-array list', '{"expressions":{"list":"nope"}}', /does not look like a desmos/i],
-    ['junk list entries', '{"expressions":{"list":[1,"a",null]}}', /not valid expressions/i],
+    ['broken JSON', '{"expressions": ', /isn.t a saved image2desmos state/i],
+    ['plain text', 'hello', /isn.t a saved image2desmos state/i],
+    ['an array', '[1,2,3]', /isn.t a saved image2desmos state/i],
+    ['null', 'null', /isn.t a saved image2desmos state/i],
+    ['a number', '42', /isn.t a saved image2desmos state/i],
+    ['an unrelated object', '{"name":"x"}', /isn.t a saved image2desmos state/i],
+    ['expressions without a list', '{"expressions":{}}', /isn.t a saved image2desmos state/i],
+    ['expressions as an array', '{"expressions":[]}', /isn.t a saved image2desmos state/i],
+    ['a non-array list', '{"expressions":{"list":"nope"}}', /isn.t a saved image2desmos state/i],
+    ['junk list entries', '{"expressions":{"list":[1,"a",null]}}', /isn.t a saved image2desmos state/i],
   ])('rejects %s with a clear message', (_name, text, message) => {
     const result = parseStateText(text)
     expect(result.ok).toBe(false)
@@ -55,6 +55,32 @@ describe('readStateFile', () => {
     const result = await readStateFile(huge)
     expect(result.ok).toBe(false)
     expect(!result.ok && result.error).toMatch(/larger than 25 MB/)
+  })
+})
+
+describe('stateExpressions', () => {
+  it('lists what the state really contains, with its colours and kinds', () => {
+    const out = stateExpressions({
+      expressions: {
+        list: [
+          { type: 'expression', id: 'a', latex: String.raw`\left(3t+1,2\right)\left\{0\le t\le1\right\}`, color: '#123456' },
+          { type: 'expression', id: 'b', latex: String.raw`\left(t^3,t\right)\left\{0\le t\le1\right\}` },
+          { type: 'expression', id: 'c', latex: String.raw`\left(x-1\right)^2+y^2=4^2` },
+          { type: 'expression', id: 'd', latex: 'y=x' },
+          { type: 'text', id: 'e', text: 'a note' },
+          { type: 'expression', id: 'f' },
+          { type: 'expression', id: 'g', latex: '  ' },
+        ],
+      },
+    })
+    expect(out.count).toBe(4)
+    expect(out.expressions.map((e) => e.type)).toEqual(['line', 'bezier', 'circle', 'other'])
+    expect(out.expressions[0].color).toBe('#123456')
+    expect(out.expressions.map((e) => e.id)).toEqual(['a', 'b', 'c', 'd'])
+  })
+
+  it('handles an empty graph', () => {
+    expect(stateExpressions({ expressions: { list: [] } }).count).toBe(0)
   })
 })
 

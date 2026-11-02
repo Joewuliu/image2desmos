@@ -6,6 +6,8 @@ import type { DesmosExpression, DesmosOutput, ImageMetadata, ProcessResponse } f
 
 const calculator = vi.hoisted(() => ({
   setBlank: vi.fn(),
+  pixelsToMath: vi.fn(),
+  setExpression: vi.fn(),
   setExpressions: vi.fn(),
   setMathBounds: vi.fn(),
   resize: vi.fn(),
@@ -36,8 +38,8 @@ const metadata: ImageMetadata = {
 }
 
 const expressions: DesmosExpression[] = [
-  { id: 'e1', latex: String.raw`\left(10t-5,5\right)\left\{0\le t\le1\right\}`, type: 'line', curve: 0 },
-  { id: 'e2', latex: String.raw`\left(x-1\right)^2+\left(y-1\right)^2=0.5^2`, type: 'circle', curve: 1 },
+  { id: 'e1', latex: String.raw`\left(10t-5,5\right)\left\{0\le t\le1\right\}`, type: 'line', curve: 0, segment: 0 },
+  { id: 'e2', latex: String.raw`\left(x-1\right)^2+\left(y-1\right)^2=0.5^2`, type: 'circle', curve: 1, segment: 0 },
 ]
 
 const desmosOutput = (list: DesmosExpression[]): DesmosOutput => ({
@@ -145,7 +147,7 @@ async function upload() {
     screen.getByLabelText(/drop a line drawing/i, { selector: 'input' }) as HTMLInputElement,
     png(),
   )
-  await waitFor(() => expect(screen.getByRole('tab', { name: 'Desmos' })).toBeEnabled())
+  await waitFor(() => expect(screen.getByRole('tab', { name: 'Graph' })).toBeEnabled())
   return user
 }
 
@@ -153,11 +155,10 @@ const exportSection = () => screen.getByRole('region', { name: 'Export' })
 const exportButton = (name: string) => within(exportSection()).getByRole('button', { name })
 
 describe('Export section', () => {
-  it('is clear that none of the files is a Desmos graph link', async () => {
+  it('is clear that state JSON is not a Desmos graph link', async () => {
     render(<App />)
     await upload()
 
-    expect(within(exportSection()).getByText(/none of them is a desmos graph link/i)).toBeInTheDocument()
     expect(within(exportSection()).getByText(/not a graph link or a native desmos file/i)).toBeInTheDocument()
   })
 
@@ -171,13 +172,12 @@ describe('Export section', () => {
     expect(downloads[0].name).toBe('sketch-desmos.txt')
     expect(await readBlob(downloads[0].blob)).toBe(`${expressions.map((e) => e.latex).join('\n')}\n`)
     expect(within(exportSection()).getByText('Downloaded 2 expressions.')).toBeInTheDocument()
-    expect(loadDesmos).not.toHaveBeenCalled()
   })
 
   it('exports the Desmos state with getState() when the graph is open', async () => {
     render(<App />)
     const user = await upload()
-    await user.click(screen.getByRole('tab', { name: 'Desmos' }))
+    await user.click(screen.getByRole('tab', { name: 'Graph' }))
     await waitFor(() => expect(calculator.setExpressions).toHaveBeenCalled())
 
     await user.click(exportButton('Export state JSON'))
@@ -190,15 +190,16 @@ describe('Export section', () => {
     expect(await within(exportSection()).findByText(/saved the desmos state/i)).toBeInTheDocument()
   })
 
-  it('opens the Desmos graph by itself when exporting state from another tab', async () => {
+  it('exports state from any stage without leaving it', async () => {
     render(<App />)
     const user = await upload()
-    expect(screen.getByRole('tab', { name: 'Curves' })).toHaveAttribute('aria-selected', 'true')
+    await waitFor(() => expect(calculator.setExpressions).toHaveBeenCalled())
+    await user.click(screen.getByRole('tab', { name: 'Curves' }))
 
     await user.click(exportButton('Export state JSON'))
 
     await waitFor(() => expect(downloads).toHaveLength(1))
-    expect(screen.getByRole('tab', { name: 'Desmos' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: 'Curves' })).toHaveAttribute('aria-selected', 'true')
     expect(JSON.parse(await readBlob(downloads[0].blob))).toEqual(calcState)
   })
 
@@ -295,7 +296,7 @@ describe('Export section', () => {
       id: `e${i + 1}`,
       latex: String.raw`\left(t,${i}\right)`,
       type: 'line',
-      curve: 0,
+      curve: 0, segment: 0,
     }))
     onProcess = () => Response.json(processed(desmosOutput(many)))
     render(<App />)
@@ -325,8 +326,8 @@ describe('Import', () => {
 
     await waitFor(() => expect(calculator.setState).toHaveBeenCalledOnce())
     expect(calculator.setState).toHaveBeenCalledWith(calcState, { allowUndo: true })
-    expect(screen.getByRole('tab', { name: 'Desmos' })).toHaveAttribute('aria-selected', 'true')
-    expect(await within(exportSection()).findByText(/loaded 1 expressions from backup\.json/i)).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Graph' })).toHaveAttribute('aria-selected', 'true')
+    expect(await within(exportSection()).findByText(/loaded backup\.json/i)).toBeInTheDocument()
   })
 
   it('applies the import after the generated graph is drawn, and can restore it', async () => {
@@ -338,17 +339,16 @@ describe('Import', () => {
     const drawOrder = calculator.setExpressions.mock.invocationCallOrder[0]
     expect(drawOrder).toBeLessThan(calculator.setState.mock.invocationCallOrder[0])
 
-    await user.click(within(exportSection()).getByRole('button', { name: 'Restore generated graph' }))
+    await user.click(screen.getByRole('button', { name: 'Restore generated graph' }))
     await waitFor(() => expect(calculator.setExpressions).toHaveBeenCalledTimes(2))
-    expect(within(exportSection()).getByText('Restored the generated graph.')).toBeInTheDocument()
-    expect(within(exportSection()).queryByRole('button', { name: 'Restore generated graph' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Restore generated graph' })).not.toBeInTheDocument()
   })
 
   it.each([
-    ['broken JSON', '{"expressions": ', /not valid json/i],
+    ['broken JSON', '{"expressions": ', /isn.t a saved image2desmos state/i],
     ['an empty file', '', /empty/i],
-    ['a JSON array', '[]', /json object/i],
-    ['an unrelated JSON object', '{"hello":"world"}', /does not look like a desmos/i],
+    ['a JSON array', '[]', /isn.t a saved image2desmos state/i],
+    ['an unrelated JSON object', '{"hello":"world"}', /isn.t a saved image2desmos state/i],
   ])('rejects %s before touching Desmos', async (_name, text, message) => {
     render(<App />)
     const user = await upload()
@@ -357,8 +357,63 @@ describe('Import', () => {
 
     expect(await within(exportSection()).findByRole('alert')).toHaveTextContent(message)
     expect(calculator.setState).not.toHaveBeenCalled()
-    expect(loadDesmos).not.toHaveBeenCalled()
-    expect(screen.getByRole('tab', { name: 'Curves' })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('shows the imported expressions, not the generated ones', async () => {
+    render(<App />)
+    const user = await upload()
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    await importFile(user, jsonFile(JSON.stringify(calcState)))
+    await waitFor(() => expect(calculator.setState).toHaveBeenCalled())
+    calculator.setExpression.mockClear()
+
+    const list = screen.getByRole('list', { name: 'Desmos expressions' })
+    await waitFor(() => expect(within(list).getAllByRole('listitem')).toHaveLength(1))
+    expect(list).toHaveTextContent('x=1')
+    expect(within(list).queryByRole('button')).not.toBeInTheDocument() // nothing to select
+    expect(screen.getByText(/imported desmos state/i)).toBeInTheDocument()
+    expect(screen.queryByLabelText('Contour statistics')).not.toBeInTheDocument()
+    expect(within(screen.getByRole('tablist', { name: 'Pipeline' })).getByText('1 expression')).toBeInTheDocument()
+
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    await user.click(screen.getByRole('button', { name: 'Copy Expressions' }))
+    expect(writeText).toHaveBeenCalledWith('x=1')
+
+    await user.click(exportButton('Download expressions'))
+    expect(await readBlob(downloads[0].blob)).toBe('x=1\n')
+    expect(calculator.setExpression).not.toHaveBeenCalled()
+  })
+
+  it('returns to the generated expressions on restore', async () => {
+    render(<App />)
+    const user = await upload()
+    await importFile(user, jsonFile(JSON.stringify(calcState)))
+    await waitFor(() => expect(calculator.setState).toHaveBeenCalled())
+
+    await user.click(screen.getByRole('button', { name: 'Restore generated graph' }))
+
+    const list = screen.getByRole('list', { name: 'Desmos expressions' })
+    expect(within(list).getAllByRole('button')).toHaveLength(expressions.length)
+    expect(screen.getByLabelText('Contour statistics')).toBeInTheDocument()
+  })
+
+  it('locks the sliders while an import shows, so it cannot vanish silently', async () => {
+    render(<App />)
+    const user = await upload()
+    await importFile(user, jsonFile(JSON.stringify(calcState)))
+    await waitFor(() => expect(calculator.setState).toHaveBeenCalled())
+
+    expect(screen.getByLabelText('Blur')).toBeDisabled()
+    expect(screen.getByText(/restore the generated graph to tune/i)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Restore generated graph' }))
+    expect(screen.getByLabelText('Blur')).toBeEnabled()
+    await waitFor(() => expect(calculator.setExpressions).toHaveBeenCalledTimes(2))
+
+    calculator.setExpression.mockClear()
+    const list = screen.getByRole('list', { name: 'Desmos expressions' })
+    await user.click(within(list).getAllByRole('button')[0])
+    await waitFor(() => expect(calculator.setExpression).toHaveBeenCalled())
   })
 
   it('reports when Desmos itself rejects the state', async () => {
@@ -370,8 +425,8 @@ describe('Import', () => {
 
     await importFile(user, jsonFile(JSON.stringify(calcState)))
 
-    expect(await within(exportSection()).findByRole('alert')).toHaveTextContent(/desmos rejected this state/i)
-    expect(within(exportSection()).queryByRole('button', { name: 'Restore generated graph' })).not.toBeInTheDocument()
+    expect(await within(exportSection()).findByRole('alert')).toHaveTextContent(/desmos couldn.t open this file/i)
+    expect(screen.queryByRole('button', { name: 'Restore generated graph' })).not.toBeInTheDocument()
   })
 
   it('recovers from an invalid file by accepting a valid one', async () => {

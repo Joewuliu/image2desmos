@@ -9,8 +9,8 @@ afterEach(() => {
 describe('expressionsToText', () => {
   it('joins latex with newlines in order', () => {
     const list: DesmosExpression[] = [
-      { id: 'e1', latex: 'a', type: 'line', curve: 0 },
-      { id: 'e2', latex: 'b', type: 'circle', curve: 1 },
+      { id: 'e1', latex: 'a', type: 'line', curve: 0, segment: 0 },
+      { id: 'e2', latex: 'b', type: 'circle', curve: 1, segment: 0 },
     ]
     expect(expressionsToText(list)).toBe('a\nb')
     expect(expressionsToText([])).toBe('')

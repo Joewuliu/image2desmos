@@ -3,7 +3,10 @@
 
 interface DesmosExpressionState {
   id: string
-  latex: string
+  latex?: string
+  lineWidth?: number
+  lineOpacity?: number
+  /** Hex colour. */
   color?: string
   hidden?: boolean
 }
@@ -25,11 +28,16 @@ interface DesmosScreenshotOptions {
 }
 
 interface DesmosCalculator {
+  /** Current viewport. */
+  graphpaperBounds?: { mathCoordinates: DesmosMathBounds }
   /** Opaque, JSON-serialisable calculator state. */
   getState(): unknown
   setState(state: unknown, options?: { allowUndo?: boolean; remapColors?: boolean }): void
   screenshot(options?: DesmosScreenshotOptions): string
   asyncScreenshot(options: DesmosScreenshotOptions, callback: (data: string) => void): void
+  /** Creates or updates one expression; only the given properties change. */
+  setExpression(expression: DesmosExpressionState): void
+  pixelsToMath(point: { x: number; y: number }): { x: number; y: number }
   setBlank(): void
   setExpressions(expressions: DesmosExpressionState[]): void
   setMathBounds(bounds: DesmosMathBounds): void

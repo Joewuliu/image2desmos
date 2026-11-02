@@ -4,27 +4,26 @@ Upload an image and get a Desmos graph that reconstructs it from mathematical eq
 
 All image processing and curve generation is deterministic: traditional computer vision (OpenCV, NumPy) and curve fitting (NumPy/SciPy). No AI, machine learning, pretrained models, or image-generation APIs are used to interpret images or produce equations.
 
-The MVP targets black-and-white line art. Color images and photographs come later.
+It is built for black-and-white line art. Color images and photographs are not supported yet.
 
-## Status
+## Features
 
-- Milestone 2 (upload): drag-and-drop upload with preview, validated server-side.
-- Milestone 3 (processing): grayscale, Gaussian blur, Canny edges, contour extraction and simplification, with live controls and an edge/contour preview.
-
-- Milestone 4 (curve fitting): contours are fitted with lines, circles and piecewise cubic Bézier curves; a Curves tab previews them over the image.
-
-- Milestone 5 (Desmos): every fitted segment is serialised to a Desmos expression, plotted live in an embedded Desmos Graphing Calculator and listed (with copy) in an Equations tab.
-
-- Milestone 6A (export): download the expressions as `.txt`, export and re-import the Desmos calculator state as JSON, and save a PNG of the graph.
-
-Graph-link generation and native Desmos file import are not implemented.
+- Upload a PNG or JPEG by drag and drop or file picker, with server-side validation. Images are processed in memory and never stored.
+- Follow the image through an interactive pipeline: Source, Edges, Contours, Curves, Graph, with live counts at each stage.
+- Tune edge sensitivity, blur, simplification, fitting accuracy and minimum contour size, with results updating as you go.
+- Fit contours with lines, circles and piecewise cubic Béziers, shown with their errors.
+- Plot real equations in an embedded Desmos Graphing Calculator, framed to the image.
+- Read the equations typeset and colour-coded by contour. Selecting an equation highlights its curve, and clicking a curve on the Curves or Graph stage selects its equation.
+- Copy all expressions, download them as text, save the calculator state as JSON, reopen a saved state, or download a PNG of the graph.
+- Undo Remove and Reset all for 10 seconds, retry a failed trace, and keep the current image if a replacement is rejected.
+- Use it on desktop, tablet or phone, with collapsible sidebars. Below 640 px they become sheets under the graph.
 
 ## Stack
 
-- Frontend: React, TypeScript, Vite, Tailwind CSS, Vitest
+- Frontend: React, TypeScript, Vite, Tailwind CSS, KaTeX, Vitest
 - Backend: Python, FastAPI, pytest
 - Image processing and fitting: OpenCV, NumPy, SciPy, Pillow
-- Graph rendering: Desmos Graphing Calculator API (v1.11) Graphing Calculator API
+- Graph rendering: Desmos Graphing Calculator API (v1.11)
 
 ## Layout
 
@@ -38,7 +37,9 @@ image2desmos/
 │   │   ├── desmos/       fitted segments -> Desmos LaTeX (pure functions)
 │   │   ├── routers/      HTTP endpoints
 │   │   └── services/     upload reading and validation
-│   └── tests/  pytest suite
+│   └── tests/            pytest suite
+├── DESIGN.md   visual design system
+├── PRODUCT.md  product context
 ├── README.md
 └── .gitignore
 ```
@@ -86,6 +87,8 @@ npm run dev
 
 The app runs at <http://localhost:5173>.
 
+The live graph needs a Desmos API key; see [Desmos API key](#desmos-api-key). The frontend expects the backend on port 8001; see [Configuration](#configuration) to change that.
+
 Other scripts: `npm run build`, `npm run lint`, `npm test`.
 
 ## API
@@ -104,22 +107,22 @@ Other scripts: `npm run build`, `npm run lint`, `npm test`.
 
 The pipeline is: decode (transparency onto white) -> grayscale -> downscale to at most 1600 px -> Gaussian blur -> Canny -> `findContours` -> drop specks -> `approxPolyDP` -> Cartesian conversion. It is deterministic: the same input and parameters always give the same output.
 
-The response contains `contours`, `stats` (contour and point counts, thresholds used), `bounds`, a real `edge_image` (PNG data URL) and `warnings` (for example `no_contours` for a blank image). Images that would produce more than 60,000 points are rejected with `too_complex`.
+The response contains `contours`, `curves`, `fit`, `desmos`, `stats` (contour and point counts, thresholds used), `bounds`, a real `edge_image` (PNG data URL) and `warnings` (for example `no_contours` for a blank image). Images that would produce too much detail (more than 60,000 simplified points, 300,000 traced points or 20,000 segments) are rejected with `too_complex`.
 
 ### Curve fitting
 
 Curves are fitted to the dense edge trace, not to the simplified polygons. For each stroke:
 
-1. An open edge (a line or arc) is traced out and back by OpenCV, so pixels visited once mark its ends; such strokes stay **open**. Closed edge loops stay **closed**.
+1. An open edge (a line, an arc, or an outline with a gap) is traced out and back by OpenCV, so the trace mirrors itself around each end; such strokes stay **open**. Closed edge loops stay **closed**, and an open stroke whose ends are within 5 pixels is closed again.
 2. A closed stroke that is accurately a full circle (least-squares fit, refined with SciPy) becomes one `circle`.
 3. Otherwise the stroke is cut at sharp corners, so corners are never rounded off.
 4. Each piece becomes a `line` if one is within tolerance, else an adaptive piecewise cubic `bezier` (Schneider's algorithm: least-squares fit, Newton reparameterisation, split at the worst point with a shared tangent).
 
-Segments share end points exactly, so curves have no gaps. `curves[].segments[]` holds `type`, `points` (line: 2 points; Bézier: start, two control points, end) or `center` and `radius` (circle), and `max_error`. `fit` holds the segment counts per type and the maximum and mean error (in units and pixels). Errors are measured against the unsmoothed pixel trace. Fitting uses 65% of `fit_tolerance` to leave room for pixel quantisation, so the reported error normally stays near the requested tolerance. Thick strokes appear as two outlines because Canny finds both edges of a stroke.
+Segments share end points exactly, so curves have no gaps. `curves[].segments[]` holds `type`, `points` (line: 2 points; Bézier: start, two control points, end) or `center` and `radius` (circle), and `max_error`. `fit` holds the segment counts per type and the maximum and mean error (in units and pixels). Errors are measured against the unsmoothed pixel trace. Fitting uses 65% of `fit_tolerance` to leave room for pixel quantisation, so the reported error normally stays near the requested tolerance. Thick strokes appear as two outlines, and filled shapes as their outlines, because Canny finds edges rather than fills.
 
 ### Desmos expressions
 
-`desmos.expressions` lists one expression per fitted segment, in plot order, each with an `id`, `latex`, `type` and source `curve`. Text is deterministic (numbers use at most 5 decimals, no exponents).
+`desmos.expressions` lists one expression per fitted segment, in plot order, each with an `id`, `latex`, `type`, source `curve` and `segment`. Text is deterministic (numbers use at most 5 decimals, no exponents).
 
 | Segment | Expression |
 | --- | --- |
@@ -135,18 +138,26 @@ Contour points are Cartesian: the origin is the image centre, x points right, y 
 
 ## Exporting
 
-The Export section appears under the preview once a result exists.
+The Export section sits at the foot of the right sidebar once a result exists. On phones it is a bar under the equation list that opens.
 
 | Export | Needs the Desmos key | What it is |
 | --- | --- | --- |
-| Expressions `.txt` | no | Every equation as Desmos LaTeX, one per line, to paste into a Desmos graph. |
-| Desmos state `.json` | yes | The output of the Desmos API's `getState()`. A backup you can re-import into Image2Desmos. |
-| Import state `.json` | yes | Validates the file, then calls `setState()`. "Restore generated graph" returns to the computed equations. |
-| Graph image `.png` | yes | A screenshot of the Desmos graph (`asyncScreenshot`, 2x resolution). |
+| Copy Expressions | no | Every expression as Desmos LaTeX, one per line, on the clipboard. |
+| Download expressions (`.txt`) | no | The same text as a file. |
+| Export state JSON | yes | The output of the Desmos API's `getState()`, to reopen in this app. |
+| Import state JSON | yes | Validates the file, then calls `setState()`. The list shows the state's own expressions, tuning is locked, and "Restore generated graph" returns to the computed ones. Saved states can also be opened from the empty screen, in a Graph-only view. |
+| Download PNG | yes | A screenshot of the Desmos graph (`asyncScreenshot`, 2x resolution). |
 
-**The state JSON is not a Desmos graph link or a native Desmos file.** Desmos treats states as opaque and has no import for these files on desmos.com. Export and import happen inside this app; use the `.txt` to move equations into the Desmos site. Import checks the file is a JSON object with an `expressions.list` array and is at most 25 MB; Desmos may still reject a state from another calculator version, which is reported as an error.
+### Export limitations
 
-Actions that need the calculator open the Desmos tab by themselves and run when the graph has drawn. Graphs above 1,500 expressions ask for confirmation before rendering.
+- **State JSON is not a Desmos graph link or a native Desmos file.** It is meant to be reopened in this app. Use Copy Expressions or the `.txt` to move equations into Desmos.
+- **Graph-link generation is not implemented.**
+- **Colours do not carry over.** Pasting into a Desmos expression line creates one expression per line, but Desmos assigns its own colours.
+- **Copying and downloading are unavailable while a trace is updating**, so old equations cannot be taken by mistake.
+- **Imported states are checked lightly.** A file must be JSON with an `expressions.list` array and at most 25 MB. Desmos may still refuse a valid-looking state, which is reported as an error.
+- **Large graphs are slower.** Above 1,500 expressions the graph asks before rendering, and exports may take a few seconds. The list shows 200 rows at a time.
+
+The calculator stays loaded across pipeline stages, so exports work from any stage. If it has not drawn yet, the action opens the Graph stage and runs when it is ready.
 
 ## Desmos API key
 
@@ -159,10 +170,10 @@ cp .env.example .env.local      # Windows PowerShell: Copy-Item .env.example .en
 npm run dev                     # restart so Vite picks up the change
 ```
 
-Without a key the Desmos tab explains how to add one; everything else, including the Equations tab and Copy Expressions, still works. Vite embeds `VITE_*` variables in the built JavaScript, so a key used in a deployed build is visible to visitors. Restrict it to your domain in the Desmos dashboard.
+Without a key the live graph, state export and import, and PNG download are unavailable, and the Graph stage says so. Every other stage, the equation list, Copy Expressions and the `.txt` download still work. Vite embeds `VITE_*` variables in the built JavaScript, so a key used in a deployed build is visible to visitors. Restrict it to your domain in the Desmos dashboard.
 
 ## Configuration
 
 The frontend reads the API address from `VITE_API_URL` (default `http://localhost:8001`). To override it, copy `frontend/.env.example` to `frontend/.env.local`.
 
-The backend allows CORS requests from `http://localhost:5173` and `http://127.0.0.1:5173`. Edit `ALLOWED_ORIGINS` in `backend/app/main.py` to change this. Never commit `.env` files.
+The backend allows CORS requests from `http://localhost:5173` and `http://127.0.0.1:5173`. Edit `ALLOWED_ORIGINS` in `backend/app/main.py` to change this. Never commit `.env` files; `.env.*` is ignored, apart from `.env.example`.

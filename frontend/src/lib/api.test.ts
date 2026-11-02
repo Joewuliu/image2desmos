@@ -55,7 +55,7 @@ describe('uploadImage', () => {
     mockFetch(new Response('boom', { status: 500 }))
     await expect(uploadImage(file)).rejects.toMatchObject({
       code: 'server_error',
-      message: 'Request failed (HTTP 500).',
+      message: 'Something went wrong on the server. Please try again.',
     })
   })
 

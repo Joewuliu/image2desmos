@@ -16,7 +16,7 @@ async function postForm<T>(path: string, body: FormData, signal?: AbortSignal): 
     response = await fetch(`${API_URL}${path}`, { method: 'POST', body, signal })
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') throw err
-    throw new UploadError('network', 'Could not reach the server. Is the backend running?')
+    throw new UploadError('network', "Image2Desmos can't reach its server right now. Check your connection and try again.")
   }
 
   if (!response.ok) {
@@ -28,7 +28,7 @@ async function postForm<T>(path: string, body: FormData, signal?: AbortSignal): 
     }
     throw new UploadError(
       parsed.detail?.code ?? 'server_error',
-      parsed.detail?.message ?? `Request failed (HTTP ${response.status}).`,
+      parsed.detail?.message ?? 'Something went wrong on the server. Please try again.',
     )
   }
 

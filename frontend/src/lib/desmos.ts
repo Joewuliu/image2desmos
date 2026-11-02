@@ -22,11 +22,11 @@ export function loadDesmos(apiKey: string): Promise<DesmosNamespace> {
     script.async = true
     script.onload = () => {
       if (window.Desmos) resolve(window.Desmos)
-      else reject(new Error('The Desmos script loaded but did not define Desmos.'))
+      else reject(new Error('Could not start the Desmos calculator. Please try again.'))
     }
     script.onerror = () => {
       script.remove()
-      reject(new Error('Could not load the Desmos calculator. Check your connection and API key.'))
+      reject(new Error('Could not load the Desmos calculator. Check your connection and try again.'))
     }
     document.head.appendChild(script)
   })

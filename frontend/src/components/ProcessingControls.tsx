@@ -1,21 +1,32 @@
-import { useId } from 'react'
+import { useId, useState, type CSSProperties } from 'react'
 import { DEFAULT_PARAMS, type ProcessingParams } from '../lib/types'
+import { MathText } from './MathText'
 
 interface ProcessingControlsProps {
   params: ProcessingParams
   onChange: (params: ProcessingParams) => void
+  /** Puts every control back to its default. */
+  onReset: () => void
+  disabled?: boolean
+  /** Why the controls are off, when that is worth saying. */
+  note?: string
 }
 
 interface SliderSpec {
   key: keyof ProcessingParams
   label: string
+  /** LaTeX symbol shown with the value, where a conventional one exists. */
+  symbol?: string
   hint: string
   min: number
   max: number
   step: number
   low: string
   high: string
+  /** LaTeX unit shown after a symbolic value. */
   unit?: string
+  /** Unit shown after a plain value. */
+  plainUnit?: string
   group: 'tracing' | 'fitting'
 }
 
@@ -35,6 +46,7 @@ const SLIDERS: SliderSpec[] = [
     group: 'tracing',
     key: 'blur_sigma',
     label: 'Blur',
+    symbol: String.raw`\sigma`,
     hint: 'Smooths out speckle and paper texture before detecting edges.',
     min: 0,
     max: 5,
@@ -57,13 +69,14 @@ const SLIDERS: SliderSpec[] = [
     group: 'fitting',
     key: 'fit_tolerance',
     label: 'Fitting accuracy',
-    hint: 'How far a curve may stray from the traced outline. Tighter fits need more segments.',
+    symbol: String.raw`\delta`,
+    hint: 'Target distance between a curve and the traced outline. Tighter targets need more segments.',
     min: 0.5,
     max: 5,
     step: 0.1,
     low: 'Precise',
     high: 'Loose',
-    unit: ' px',
+    unit: String.raw`\,\text{px}`,
   },
   {
     group: 'fitting',
@@ -75,7 +88,7 @@ const SLIDERS: SliderSpec[] = [
     step: 0.5,
     low: 'Keep all',
     high: 'Large only',
-    unit: '%',
+    plainUnit: '%',
   },
 ]
 
@@ -84,18 +97,32 @@ const GROUPS: { id: SliderSpec['group']; title: string }[] = [
   { id: 'fitting', title: 'Curve fitting' },
 ]
 
-function Slider({ spec, value, onChange }: { spec: SliderSpec; value: number; onChange: (v: number) => void }) {
+interface SliderProps {
+  spec: SliderSpec
+  value: number
+  disabled: boolean
+  onChange: (value: number) => void
+  onHint: (hint: string | null) => void
+}
+
+function Slider({ spec, value, disabled, onChange, onHint }: SliderProps) {
   const id = useId()
-  const hintId = useId()
   return (
-    <div>
-      <div className="flex items-baseline justify-between">
-        <label htmlFor={id} className="text-sm font-medium text-ink">
+    <div
+      className="border-b border-line px-3 pt-1.5 pb-1"
+      onPointerEnter={() => onHint(spec.hint)}
+      onPointerLeave={() => onHint(null)}
+    >
+      <div className="flex items-baseline justify-between gap-2">
+        <label htmlFor={id} className="text-ui text-ink">
           {spec.label}
         </label>
-        <output htmlFor={id} className="font-mono text-sm text-vermilion-deep tabular-nums">
-          {value}
-          {spec.unit}
+        <output htmlFor={id} className={spec.symbol ? 'text-[15px] text-ink' : 'text-ui text-ink tabular-nums'}>
+          {spec.symbol ? (
+            <MathText latex={`${spec.symbol}=${value}${spec.unit ?? ''}`} />
+          ) : (
+            `${value}${spec.plainUnit ?? ''}`
+          )}
         </output>
       </div>
       <input
@@ -105,50 +132,68 @@ function Slider({ spec, value, onChange }: { spec: SliderSpec; value: number; on
         max={spec.max}
         step={spec.step}
         value={value}
-        aria-describedby={hintId}
+        disabled={disabled}
+        aria-description={spec.hint}
+        onFocus={() => onHint(spec.hint)}
+        onBlur={() => onHint(null)}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="mt-2 h-1.5 w-full cursor-pointer appearance-none rounded-full bg-ink/15 accent-vermilion focus-visible:ring-2 focus-visible:ring-vermilion focus-visible:ring-offset-2 focus-visible:ring-offset-paper-raised focus-visible:outline-none"
+        className="slider"
+        style={{ '--fill': `${((value - spec.min) / (spec.max - spec.min)) * 100}%` } as CSSProperties}
       />
-      <div className="mt-1 flex justify-between font-mono text-[11px] tracking-wide text-ink/45 uppercase">
+      <div className="flex justify-between text-2xs text-ink-muted">
         <span>{spec.low}</span>
         <span>{spec.high}</span>
       </div>
-      <p id={hintId} className="mt-1 text-xs text-ink-muted">
-        {spec.hint}
-      </p>
     </div>
   )
 }
 
-export function ProcessingControls({ params, onChange }: ProcessingControlsProps) {
+export function ProcessingControls({ params, onChange, onReset, disabled = false, note }: ProcessingControlsProps) {
+  const [hint, setHint] = useState<string | null>(null)
   const isDefault = SLIDERS.every((s) => params[s.key] === DEFAULT_PARAMS[s.key])
   return (
-    <section aria-label="Processing controls" className="space-y-6">
-      {GROUPS.map((group, index) => (
-        <div key={group.id} className="space-y-5">
-          <div className="flex items-center justify-between">
-            <p className="font-mono text-xs tracking-wide text-ink-muted uppercase">{group.title}</p>
-            {index === 0 && (
-              <button
-                type="button"
-                disabled={isDefault}
-                onClick={() => onChange(DEFAULT_PARAMS)}
-                className="text-xs font-medium text-ink underline underline-offset-4 hover:text-vermilion-deep disabled:cursor-default disabled:text-ink/30 disabled:no-underline"
-              >
-                Reset
-              </button>
-            )}
+    <>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {GROUPS.map((group, index) => (
+          <div key={group.id}>
+            <div className="panel-head">
+              <h2>{group.title}</h2>
+              {index === 0 && (
+                <button
+                  type="button"
+                  disabled={isDefault || disabled}
+                  onClick={onReset}
+                  className="btn btn-link"
+                >
+                  Reset all
+                </button>
+              )}
+            </div>
+            {SLIDERS.filter((spec) => spec.group === group.id).map((spec) => (
+              <Slider
+                key={spec.key}
+                spec={spec}
+                value={params[spec.key]}
+                disabled={disabled}
+                onHint={setHint}
+                onChange={(v) => onChange({ ...params, [spec.key]: v })}
+              />
+            ))}
           </div>
-          {SLIDERS.filter((spec) => spec.group === group.id).map((spec) => (
-            <Slider
-              key={spec.key}
-              spec={spec}
-              value={params[spec.key]}
-              onChange={(v) => onChange({ ...params, [spec.key]: v })}
-            />
-          ))}
-        </div>
-      ))}
-    </section>
+        ))}
+        {!disabled && (
+          <p className="px-3 py-2 text-xs text-ink-muted sm:hidden">
+            Images are processed in memory and never stored. No AI. Not affiliated with Desmos.
+          </p>
+        )}
+      </div>
+      <p
+        className={`flex h-[3.3125rem] flex-none items-center border-t border-line bg-gutter px-3 text-xs text-ink-muted ${
+          disabled || hint ? '' : 'max-sm:hidden'
+        }`}
+      >
+        {note ?? hint ?? 'Images are processed in memory and never stored. No AI. Not affiliated with Desmos.'}
+      </p>
+    </>
   )
 }

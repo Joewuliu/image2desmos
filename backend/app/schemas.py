@@ -86,6 +86,7 @@ class ExpressionOut(BaseModel):
     latex: str
     type: Literal["line", "bezier", "circle"]
     curve: int
+    segment: int
 
 
 class DesmosOut(BaseModel):

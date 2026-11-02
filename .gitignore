@@ -25,6 +25,10 @@ uploads/
 output/
 *.log
 
+# Local tool folders and machine-specific settings
+.claude/
+.impeccable/
+
 # Editors and OS
 .vscode/*
 !.vscode/extensions.json

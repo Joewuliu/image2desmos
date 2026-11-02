@@ -6,6 +6,8 @@ import type { DesmosExpression, DesmosOutput, ImageMetadata, ProcessResponse } f
 
 const calculator = vi.hoisted(() => ({
   setBlank: vi.fn(),
+  pixelsToMath: vi.fn(),
+  setExpression: vi.fn(),
   setExpressions: vi.fn(),
   setMathBounds: vi.fn(),
   resize: vi.fn(),
@@ -32,9 +34,9 @@ const metadata: ImageMetadata = {
 }
 
 const expressions: DesmosExpression[] = [
-  { id: 'e1', latex: String.raw`\left(10t-5,5\right)\left\{0\le t\le1\right\}`, type: 'line', curve: 0 },
-  { id: 'e2', latex: String.raw`\left(-3t^3+5,2t\right)\left\{0\le t\le1\right\}`, type: 'bezier', curve: 0 },
-  { id: 'e3', latex: String.raw`\left(x-1\right)^2+\left(y-1\right)^2=0.5^2`, type: 'circle', curve: 1 },
+  { id: 'e1', latex: String.raw`\left(10t-5,5\right)\left\{0\le t\le1\right\}`, type: 'line', curve: 0, segment: 0 },
+  { id: 'e2', latex: String.raw`\left(-3t^3+5,2t\right)\left\{0\le t\le1\right\}`, type: 'bezier', curve: 0, segment: 0 },
+  { id: 'e3', latex: String.raw`\left(x-1\right)^2+\left(y-1\right)^2=0.5^2`, type: 'circle', curve: 1, segment: 0 },
 ]
 
 function desmosOutput(list: DesmosExpression[], skipped = 0): DesmosOutput {
@@ -106,15 +108,15 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-async function uploadAndOpen(tab: string) {
+async function uploadAndOpen(stage?: string) {
   const user = userEvent.setup()
   await user.upload(
     screen.getByLabelText(/drop a line drawing/i, { selector: 'input' }) as HTMLInputElement,
     png(),
   )
-  const button = await screen.findByRole('tab', { name: tab })
-  await waitFor(() => expect(button).toBeEnabled())
-  await user.click(button)
+  const graph = await screen.findByRole('tab', { name: 'Graph' })
+  await waitFor(() => expect(graph).toBeEnabled())
+  if (stage) await user.click(screen.getByRole('tab', { name: stage }))
   return user
 }
 
@@ -123,16 +125,16 @@ function stubClipboard(writeText: ReturnType<typeof vi.fn>) {
   Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
 }
 
-describe('Equations tab', () => {
+describe('Equations panel', () => {
   it('lists the generated expressions and their count', async () => {
     render(<App />)
-    await uploadAndOpen('Equations')
+    await uploadAndOpen()
 
     expect(screen.getByTestId('equation-count')).toHaveTextContent('3')
     const rows = within(screen.getByRole('list', { name: 'Desmos expressions' })).getAllByRole('listitem')
     expect(rows).toHaveLength(3)
     expect(rows[0]).toHaveTextContent('line')
-    expect(rows[1]).toHaveTextContent('bezier')
+    expect(rows[1]).toHaveTextContent('Bézier')
     expect(rows[2]).toHaveTextContent('circle')
     expect(rows[2]).toHaveTextContent('0.5^2')
   })
@@ -140,7 +142,7 @@ describe('Equations tab', () => {
   it('copies every expression, one per line', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     render(<App />)
-    const user = await uploadAndOpen('Equations')
+    const user = await uploadAndOpen()
     stubClipboard(writeText)
 
     await user.click(screen.getByRole('button', { name: 'Copy Expressions' }))
@@ -148,12 +150,13 @@ describe('Equations tab', () => {
     expect(writeText).toHaveBeenCalledOnce()
     expect((writeText.mock.calls[0][0] as string).split('\n')).toEqual(expressions.map((e) => e.latex))
     expect(await screen.findByText('Copied 3 expressions')).toBeInTheDocument()
+    expect(screen.getByText(/paste into a desmos expression line/i)).toBeInTheDocument()
   })
 
   it('reports a failed copy', async () => {
     document.execCommand = vi.fn(() => false)
     render(<App />)
-    const user = await uploadAndOpen('Equations')
+    const user = await uploadAndOpen()
     stubClipboard(vi.fn().mockRejectedValue(new Error('denied')))
 
     await user.click(screen.getByRole('button', { name: 'Copy Expressions' }))
@@ -163,7 +166,7 @@ describe('Equations tab', () => {
   it('shows an empty state when there are no equations', async () => {
     onProcess = () => Response.json(processed(desmosOutput([])))
     render(<App />)
-    await uploadAndOpen('Equations')
+    await uploadAndOpen()
 
     expect(screen.getByText(/no equations yet/i)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Copy Expressions' })).not.toBeInTheDocument()
@@ -172,7 +175,7 @@ describe('Equations tab', () => {
   it('explains skipped segments', async () => {
     onProcess = () => Response.json(processed(desmosOutput(expressions, 2)))
     render(<App />)
-    await uploadAndOpen('Equations')
+    await uploadAndOpen()
 
     expect(screen.getByText(/2 segments were skipped/i)).toBeInTheDocument()
   })
@@ -180,7 +183,7 @@ describe('Equations tab', () => {
   it('says so when every segment was skipped', async () => {
     onProcess = () => Response.json(processed(desmosOutput([], 4)))
     render(<App />)
-    await uploadAndOpen('Equations')
+    await uploadAndOpen()
 
     expect(screen.getByText(/none of the 4 fitted segments/i)).toBeInTheDocument()
   })
@@ -190,12 +193,12 @@ describe('Equations tab', () => {
       id: `e${i + 1}`,
       latex: String.raw`\left(t,${i}\right)`,
       type: 'line',
-      curve: 0,
+      curve: 0, segment: 0,
     }))
     const writeText = vi.fn().mockResolvedValue(undefined)
     onProcess = () => Response.json(processed(desmosOutput(many)))
     render(<App />)
-    const user = await uploadAndOpen('Equations')
+    const user = await uploadAndOpen()
     stubClipboard(writeText)
 
     expect(
@@ -207,10 +210,10 @@ describe('Equations tab', () => {
   })
 })
 
-describe('Desmos tab', () => {
+describe('Graph stage', () => {
   it('renders the real equations in an embedded calculator, not an overlay', async () => {
     render(<App />)
-    await uploadAndOpen('Desmos')
+    await uploadAndOpen('Graph')
 
     await waitFor(() => expect(calculator.setExpressions).toHaveBeenCalledOnce())
     expect(loadDesmos).toHaveBeenCalledWith('test-key')
@@ -226,7 +229,7 @@ describe('Desmos tab', () => {
 
   it('fits the viewport to the image with the graph element’s aspect ratio', async () => {
     render(<App />)
-    await uploadAndOpen('Desmos')
+    await uploadAndOpen('Graph')
 
     await waitFor(() => expect(calculator.setMathBounds).toHaveBeenCalled())
     const b = calculator.setMathBounds.mock.calls[0][0] as {
@@ -244,21 +247,34 @@ describe('Desmos tab', () => {
     expect((b.left + b.right) / 2).toBeCloseTo(0)
   })
 
-  it('re-fits on demand and destroys the calculator when leaving the tab', async () => {
+  it('re-fits on demand and keeps the calculator across stages until the image goes', async () => {
     render(<App />)
-    const user = await uploadAndOpen('Desmos')
+    const user = await uploadAndOpen('Graph')
     await waitFor(() => expect(calculator.setMathBounds).toHaveBeenCalledOnce())
 
     await user.click(screen.getByRole('button', { name: 'Fit to image' }))
     expect(calculator.setMathBounds).toHaveBeenCalledTimes(2)
 
     await user.click(screen.getByRole('tab', { name: 'Curves' }))
+    expect(calculator.destroy).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Remove' }))
     expect(calculator.destroy).toHaveBeenCalledOnce()
+  })
+
+  it('colours each equation by its stroke', async () => {
+    render(<App />)
+    await uploadAndOpen('Graph')
+    await waitFor(() => expect(calculator.setExpressions).toHaveBeenCalledOnce())
+
+    const sent = calculator.setExpressions.mock.calls[0][0] as { color: string }[]
+    expect(sent[0].color).toBe(sent[1].color) // same stroke
+    expect(sent[2].color).not.toBe(sent[0].color)
   })
 
   it('redraws when settings change', async () => {
     render(<App />)
-    await uploadAndOpen('Desmos')
+    await uploadAndOpen('Graph')
     await waitFor(() => expect(calculator.setExpressions).toHaveBeenCalledOnce())
 
     onProcess = () => Response.json(processed(desmosOutput(expressions.slice(0, 1))))
@@ -272,7 +288,7 @@ describe('Desmos tab', () => {
   it('shows an error with a retry when the Desmos script fails to load', async () => {
     loadDesmos.mockRejectedValueOnce(new Error('Could not load the Desmos calculator.'))
     render(<App />)
-    const user = await uploadAndOpen('Desmos')
+    const user = await uploadAndOpen('Graph')
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/could not load the desmos calculator/i)
     await user.click(screen.getByRole('button', { name: 'Try again' }))
@@ -282,7 +298,7 @@ describe('Desmos tab', () => {
   it('shows a message instead of an empty graph when there is nothing to plot', async () => {
     onProcess = () => Response.json(processed(desmosOutput([])))
     render(<App />)
-    await uploadAndOpen('Desmos')
+    await uploadAndOpen('Graph')
 
     expect(screen.getByText(/no equations to plot/i)).toBeInTheDocument()
     expect(loadDesmos).not.toHaveBeenCalled()
@@ -293,11 +309,11 @@ describe('Desmos tab', () => {
       id: `e${i + 1}`,
       latex: String.raw`\left(t,${i}\right)`,
       type: 'line',
-      curve: 0,
+      curve: 0, segment: 0,
     }))
     onProcess = () => Response.json(processed(desmosOutput(many)))
     render(<App />)
-    const user = await uploadAndOpen('Desmos')
+    const user = await uploadAndOpen('Graph')
 
     expect(screen.getByText(/has 1,600 expressions\./)).toBeInTheDocument()
     expect(loadDesmos).not.toHaveBeenCalled()
@@ -305,5 +321,193 @@ describe('Desmos tab', () => {
     await user.click(screen.getByRole('button', { name: 'Render anyway' }))
     await waitFor(() => expect(calculator.setExpressions).toHaveBeenCalledOnce())
     expect((calculator.setExpressions.mock.calls[0][0] as unknown[]).length).toBe(1600)
+  })
+})
+
+describe('Selection', () => {
+  const row = (index: number) =>
+    within(screen.getByRole('list', { name: 'Desmos expressions' })).getAllByRole('button')[index]
+
+  it('typesets equations, splitting parametric ones into x(t) and y(t)', async () => {
+    render(<App />)
+    await uploadAndOpen()
+
+    expect(row(1).querySelectorAll('.katex')).toHaveLength(2)
+    expect(row(2).querySelectorAll('.katex')).toHaveLength(1)
+  })
+
+  it('emphasises the selected equation in the graph and restores it', async () => {
+    render(<App />)
+    const user = await uploadAndOpen('Graph')
+    await waitFor(() => expect(calculator.setExpressions).toHaveBeenCalledOnce())
+
+    await user.click(row(1))
+    expect(row(1)).toHaveAttribute('aria-pressed', 'true')
+    await waitFor(() => expect(calculator.setExpression).toHaveBeenCalledWith({ id: 'e2', lineWidth: 6 }))
+
+    await user.click(row(2))
+    expect(calculator.setExpression).toHaveBeenCalledWith({ id: 'e2', lineWidth: 2.5 })
+    expect(calculator.setExpression).toHaveBeenCalledWith({ id: 'e3', lineWidth: 6 })
+
+    await user.click(row(2))
+    expect(row(2)).toHaveAttribute('aria-pressed', 'false')
+    expect(calculator.setExpression).toHaveBeenLastCalledWith({ id: 'e3', lineWidth: 2.5 })
+  })
+
+  it('shows the selected segment on the stages without live curves', async () => {
+    const mapped = expressions.map((e, i) => ({ ...e, curve: 0, segment: i }))
+    const line = { type: 'line' as const, points: [[0, 0], [1, 1]] as [number, number][], center: null, radius: null, max_error: 0 }
+    onProcess = () =>
+      Response.json({
+        ...processed(desmosOutput(mapped)),
+        curves: [{ closed: false, source_points: 9, max_error: 0, segments: [line, line, line] }],
+      })
+    render(<App />)
+    const user = await uploadAndOpen('Edges')
+    await user.click(row(1))
+
+    expect(document.querySelector('path[data-selected-segment="e2"]')).not.toBeNull()
+  })
+
+  it('selects an equation by clicking its curve in the live graph, and clears on empty paper', async () => {
+    const mapped = expressions.map((e, i) => ({ ...e, curve: 0, segment: i }))
+    const line = (y: number) => ({ type: 'line' as const, points: [[-5, y], [5, y]] as [number, number][], center: null, radius: null, max_error: 0 })
+    onProcess = () =>
+      Response.json({
+        ...processed(desmosOutput(mapped)),
+        curves: [{ closed: false, source_points: 9, max_error: 0, segments: [line(0), line(3), line(6)] }],
+      })
+    calculator.pixelsToMath.mockImplementation(({ x, y }: { x: number; y: number }) => ({ x: x / 10, y: y / 10 }))
+    render(<App />)
+    await uploadAndOpen('Graph')
+    await waitFor(() => expect(calculator.setExpressions).toHaveBeenCalled())
+    const host = screen.getByTestId('desmos-host')
+
+    fireEvent.pointerDown(host, { clientX: 20, clientY: 30 })
+    fireEvent.pointerUp(host, { clientX: 20, clientY: 30 })
+    expect(row(1)).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.pointerDown(host, { clientX: 20, clientY: 15 })
+    fireEvent.pointerUp(host, { clientX: 20, clientY: 15 })
+    expect(row(1)).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('treats a drag as panning, not a click', async () => {
+    calculator.pixelsToMath.mockReturnValue({ x: 0, y: 0 })
+    render(<App />)
+    await uploadAndOpen('Graph')
+    await waitFor(() => expect(calculator.setExpressions).toHaveBeenCalled())
+    const host = screen.getByTestId('desmos-host')
+
+    fireEvent.pointerDown(host, { clientX: 20, clientY: 30 })
+    fireEvent.pointerUp(host, { clientX: 120, clientY: 30 })
+    expect(calculator.pixelsToMath).not.toHaveBeenCalled()
+  })
+
+  it('opens the equations panel when a curve is picked with it closed', async () => {
+    const mapped = expressions.map((e, i) => ({ ...e, curve: 0, segment: i }))
+    const circle = { type: 'circle' as const, points: [], center: [1, 1] as [number, number], radius: 0.5, max_error: 0 }
+    onProcess = () =>
+      Response.json({
+        ...processed(desmosOutput(mapped)),
+        curves: [{ closed: true, source_points: 9, max_error: 0, segments: [circle] }],
+      })
+    render(<App />)
+    const user = await uploadAndOpen('Curves')
+    await user.click(screen.getByRole('button', { name: 'Equations' }))
+    expect(screen.getByRole('button', { name: 'Equations' })).toHaveAttribute('aria-expanded', 'false')
+
+    await user.click(document.querySelector('path[data-expression="e1"]') as Element)
+    expect(screen.getByRole('button', { name: 'Equations' })).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('clears the selection with Escape', async () => {
+    render(<App />)
+    const user = await uploadAndOpen()
+
+    await user.click(row(0))
+    await user.keyboard('{Escape}')
+    expect(row(0)).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('selects an equation by clicking its curve in the Curves stage', async () => {
+    const circle = { type: 'circle' as const, points: [], center: [1, 1] as [number, number], radius: 0.5, max_error: 0 }
+    const mapped = expressions.map((e, i) => ({ ...e, curve: 0, segment: i }))
+    onProcess = () =>
+      Response.json({
+        ...processed(desmosOutput(mapped)),
+        curves: [{ closed: true, source_points: 9, max_error: 0, segments: [circle] }],
+      })
+    render(<App />)
+    const user = await uploadAndOpen('Curves')
+
+    const target = document.querySelector('path[data-expression="e1"]')
+    expect(target).not.toBeNull()
+    await user.click(target as Element)
+    expect(row(0)).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('drops the selection when settings produce a new result', async () => {
+    render(<App />)
+    const user = await uploadAndOpen()
+    await user.click(row(0))
+
+    fireEvent.change(screen.getByLabelText('Blur'), { target: { value: '3' } })
+    await waitFor(() => expect(row(0)).toHaveAttribute('aria-pressed', 'false'), { timeout: 2000 })
+  })
+
+  it('reveals more equations on request', async () => {
+    const many: DesmosExpression[] = Array.from({ length: 450 }, (_, i) => ({
+      id: `e${i + 1}`,
+      latex: 'y=1',
+      type: 'line',
+      curve: 0,
+      segment: i,
+    }))
+    onProcess = () => Response.json(processed(desmosOutput(many)))
+    render(<App />)
+    const user = await uploadAndOpen()
+
+    await user.click(screen.getByRole('button', { name: 'Show more' }))
+    expect(screen.getByText(/first 400 of 450/i)).toBeInTheDocument()
+  })
+})
+
+describe('Workspace', () => {
+  it('collapses and restores the sidebars', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    const controls = screen.getByRole('region', { name: 'Processing controls' })
+    const toggle = screen.getByRole('button', { name: 'Controls' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+
+    await user.click(toggle)
+    expect(controls).toHaveAttribute('hidden')
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+
+    await user.click(toggle)
+    expect(controls).not.toHaveAttribute('hidden')
+  })
+
+  it('moves through the pipeline with the arrow keys', async () => {
+    render(<App />)
+    const user = await uploadAndOpen()
+
+    screen.getByRole('tab', { name: 'Graph' }).focus()
+    await user.keyboard('{ArrowLeft}')
+    expect(screen.getByRole('tab', { name: 'Curves' })).toHaveAttribute('aria-selected', 'true')
+    await user.keyboard('{ArrowRight}{ArrowRight}')
+    expect(screen.getByRole('tab', { name: 'Source' })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('shows what each pipeline stage produced', async () => {
+    render(<App />)
+    await uploadAndOpen()
+
+    const strip = screen.getByRole('tablist', { name: 'Pipeline' })
+    expect(within(strip).getByText('640 × 480')).toBeInTheDocument()
+    expect(within(strip).getByText('900 px')).toBeInTheDocument()
+    expect(within(strip).getByText('7 points')).toBeInTheDocument()
+    expect(within(strip).getByText('3 expressions')).toBeInTheDocument()
   })
 })

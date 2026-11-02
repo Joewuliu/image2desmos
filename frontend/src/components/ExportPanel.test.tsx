@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ExportPanel } from './ExportPanel'
 
 const desmos = {
-  expressions: [{ id: 'e1', latex: 'x^2+y^2=1', type: 'circle' as const, curve: 0 }],
+  expressions: [{ id: 'e1', latex: 'x^2+y^2=1', type: 'circle' as const, curve: 0, segment: 0 }],
   count: 1,
   skipped: {},
   skipped_count: 0,
@@ -12,7 +12,6 @@ const desmos = {
 
 function renderPanel(props: Partial<React.ComponentProps<typeof ExportPanel>> = {}) {
   const onNeedGraph = vi.fn()
-  const onRestore = vi.fn()
   render(
     <ExportPanel
       desmos={desmos}
@@ -20,11 +19,10 @@ function renderPanel(props: Partial<React.ComponentProps<typeof ExportPanel>> = 
       hasApiKey
       calculator={null}
       onNeedGraph={onNeedGraph}
-      onRestore={onRestore}
       {...props}
     />,
   )
-  return { onNeedGraph, onRestore }
+  return { onNeedGraph }
 }
 
 let clicks: string[]
@@ -50,12 +48,27 @@ describe('ExportPanel without a Desmos API key', () => {
     expect(screen.getByRole('button', { name: 'Export state JSON' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Import state JSON' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Download PNG' })).toBeDisabled()
-    expect(screen.getByText(/needs a desmos api key/i)).toBeInTheDocument()
+    expect(screen.getByText(/need the live graph/i)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Download expressions' }))
     expect(clicks).toEqual(['ring-desmos.txt'])
-    expect(screen.getByText('Downloaded 1 expressions.')).toBeInTheDocument()
+    expect(screen.getByText('Downloaded 1 expression.')).toBeInTheDocument()
     expect(onNeedGraph).not.toHaveBeenCalled()
+  })
+})
+
+describe('ExportPanel on a phone', () => {
+  it('opens from a bar that stays available above any list length', async () => {
+    const user = userEvent.setup()
+    renderPanel({ collapsible: true })
+    const bar = screen.getByRole('button', { name: 'Export' })
+    expect(bar).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('button', { name: 'Download PNG' })).not.toBeInTheDocument()
+
+    await user.click(bar)
+    expect(bar).toHaveAttribute('aria-expanded', 'true')
+    await user.click(screen.getByRole('button', { name: 'Download expressions' }))
+    expect(clicks).toEqual(['ring-desmos.txt'])
   })
 })
 

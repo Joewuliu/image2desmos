@@ -27,6 +27,7 @@ class Expression:
     latex: str
     type: Literal["line", "bezier", "circle"]
     curve: int  # index of the stroke this expression belongs to
+    segment: int  # index of the fitted segment within that stroke
 
 
 @dataclass(frozen=True)
@@ -103,7 +104,7 @@ def serialize_curves(curves: list[FittedCurve]) -> DesmosGraph:
     expressions: list[Expression] = []
     skipped: dict[str, int] = {}
     for curve_index, curve in enumerate(curves):
-        for segment in curve.segments:
+        for segment_index, segment in enumerate(curve.segments):
             result = segment_latex(segment)
             if result in ("invalid_geometry", "degenerate"):
                 skipped[result] = skipped.get(result, 0) + 1
@@ -114,6 +115,7 @@ def serialize_curves(curves: list[FittedCurve]) -> DesmosGraph:
                     latex=result,
                     type=segment.type,
                     curve=curve_index,
+                    segment=segment_index,
                 )
             )
     return DesmosGraph(expressions=expressions, skipped=dict(sorted(skipped.items())))

@@ -95,8 +95,14 @@ export interface DesmosExpression {
   /** Valid Desmos expression id. */
   id: string
   latex: string
-  type: 'line' | 'bezier' | 'circle'
+  /** `other` only appears for expressions read from an imported state. */
+  type: 'line' | 'bezier' | 'circle' | 'other'
+  /** Colour from an imported state; generated expressions use their contour's colour. */
+  color?: string
+  /** Index into `curves`. */
   curve: number
+  /** Index into that curve's `segments`. */
+  segment: number
 }
 
 export interface DesmosOutput {

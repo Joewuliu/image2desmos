@@ -66,6 +66,6 @@ describe('loadDesmos', () => {
     const { loadDesmos } = await freshModule()
     const pending = loadDesmos('key')
     scripts()[0].onload?.(new Event('load'))
-    await expect(pending).rejects.toThrow(/did not define/i)
+    await expect(pending).rejects.toThrow(/could not start the desmos calculator/i)
   })
 })

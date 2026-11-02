@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import pytest
 
 from app.processing import contours as contour_ops
 from app.processing import edges, preprocess
@@ -31,13 +32,54 @@ def test_out_and_back_trace_becomes_one_open_stroke() -> None:
 
 
 def test_branching_trace_yields_open_strokes_only() -> None:
-    # A "T" traced out-and-back along every branch.
-    stem = [[5, y] for y in range(5, -1, -1)]
-    left = [[x, 0] for x in range(4, -1, -1)]
-    right = [[x, 0] for x in range(6, 11)]
-    trace = stem + left + left[-2::-1] + right + right[-2::-1] + stem[-2::-1][::-1][::-1]
-    strokes = contour_to_strokes(np.array(trace, dtype=np.int32))
-    assert strokes and all(not closed for _, closed in strokes)
+    # A real "T" of one-pixel edges, as OpenCV traces it.
+    edge_map = np.zeros((100, 100), dtype=np.uint8)
+    cv2.line(edge_map, (10, 20), (90, 20), 255, 1)
+    cv2.line(edge_map, (50, 20), (50, 90), 255, 1)
+    strokes = [s for t in contour_ops.extract_contours(edge_map) for s in contour_to_strokes(t)]
+    assert len(strokes) == 3 or len(strokes) == 2
+    assert all(not closed for _, closed in strokes)
+    assert max(stroke_extent(pts) for pts, _ in strokes) >= 70
+    assert sum(len(pts) for pts, _ in strokes) >= 140  # the bar and the stem are both there
+
+
+def _traces(edge_map: np.ndarray) -> list[np.ndarray]:
+    return contour_ops.extract_contours(edge_map)
+
+
+def test_diagonal_edge_is_one_stroke_not_fragments() -> None:
+    # Staircase pixels are visited once per walk; they must not read as stroke ends.
+    edge_map = np.zeros((300, 300), dtype=np.uint8)
+    cv2.polylines(edge_map, [np.array([[20, 280], [150, 30], [280, 250]], np.int32)], False, 255, 1)
+
+    [(pts, closed)] = [s for t in _traces(edge_map) for s in contour_to_strokes(t)]
+    assert not closed
+    assert stroke_extent(pts) >= 250
+
+
+def test_small_gap_in_a_loop_is_closed_again() -> None:
+    edge_map = np.zeros((200, 200), dtype=np.uint8)
+    cv2.circle(edge_map, (100, 100), 70, 255, 1)
+    edge_map[28:32, 98:101] = 0
+
+    strokes = [s for t in _traces(edge_map) for s in contour_to_strokes(t)]
+    assert len(strokes) == 1
+    pts, closed = strokes[0]
+    assert closed
+    assert len(pts) > 300
+
+
+@pytest.mark.parametrize("blur", [0.5, 1.0, 1.5, 2.0, 3.0])
+def test_curves_keep_the_whole_outline_at_every_blur(blur: float) -> None:
+    # Outlines must not lose edges when Canny happens to leave a small gap.
+    img = synthetic.blank(600)
+    triangle = np.array([[300, 60], [520, 500], [90, 470]], np.int32)
+    cv2.fillPoly(img, [triangle], 0, cv2.LINE_AA)
+    result = process_gray(img, ProcessingParams(blur_sigma=blur))
+    # Heavy blur can split the inner and outer edge, which is still a complete outline.
+    assert 1 <= len(result.curves) <= 3
+    # Diagonal traces skip corner pixels, so about 3 in 4 edge pixels is a full outline.
+    assert sum(c.source_points for c in result.curves) >= 0.7 * result.edge_pixel_count
 
 
 def test_tiny_inputs() -> None:

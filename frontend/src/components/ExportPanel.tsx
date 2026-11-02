@@ -20,67 +20,44 @@ interface ExportPanelProps {
   /** Name of the uploaded image, used to name downloads. */
   sourceName?: string
   hasApiKey: boolean
-  /** The live calculator, once the Desmos tab has drawn it. */
+  /** The live calculator, once it has drawn the graph. */
   calculator: DesmosCalculator | null
-  /** Opens the Desmos tab so a calculator exists. */
+  /** Opens the Graph stage so a calculator can exist. */
   onNeedGraph: () => void
-  /** Redraws the generated equations, discarding an imported state. */
-  onRestore: () => void
+  /** Runs before the graph is captured, so a selection is not exported. */
+  onBeforeCapture?: () => void
+  /** On phones the section is a bar that opens, so it is always in reach of a long list. */
+  collapsible?: boolean
+  /** A new trace is running, so these expressions are about to be replaced. */
+  updating?: boolean
+  /** Called with the state that replaced the generated graph. */
+  onImported?: (state: object) => void
   /** Above this many expressions, exports warn that they may be slow. */
   largeThreshold?: number
 }
 
 const IDLE: Status = { phase: 'idle', message: '' }
+const SUCCESS_NOTICE_MS = 6000
 const nextFrame = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
 
 function StatusLine({ status }: { status: Status }) {
   if (status.phase === 'idle') return null
   const tone =
     status.phase === 'error'
-      ? 'text-vermilion-deep'
+      ? 'text-danger'
       : status.phase === 'success'
-        ? 'text-emerald-800'
+        ? 'text-success'
         : 'text-ink-muted'
   return (
     <p
       role={status.phase === 'error' ? 'alert' : 'status'}
-      className={`mt-2 flex items-center gap-2 text-xs ${tone}`}
+      className={`flex items-center gap-1.5 ${tone}`}
     >
       {status.phase === 'working' && (
-        <span className="size-3 animate-spin rounded-full border-2 border-ink/20 border-t-ink" />
+        <span className="size-3 flex-none animate-spin rounded-full border-2 border-line-strong border-t-accent" />
       )}
       {status.message}
     </p>
-  )
-}
-
-const buttonClass =
-  'rounded-lg bg-ink px-4 py-2 text-sm font-medium text-paper transition-colors hover:bg-ink/85 focus-visible:ring-2 focus-visible:ring-vermilion focus-visible:ring-offset-2 focus-visible:ring-offset-paper focus-visible:outline-none disabled:cursor-not-allowed disabled:bg-ink/25'
-const secondaryButtonClass =
-  'rounded-lg border border-ink/25 px-4 py-2 text-sm font-medium text-ink transition-colors hover:border-vermilion hover:text-vermilion-deep focus-visible:ring-2 focus-visible:ring-vermilion focus-visible:ring-offset-2 focus-visible:ring-offset-paper focus-visible:outline-none disabled:cursor-not-allowed disabled:border-ink/10 disabled:text-ink/30 disabled:hover:border-ink/10 disabled:hover:text-ink/30'
-
-function Row({
-  title,
-  description,
-  status,
-  children,
-}: {
-  title: string
-  description: string
-  status: Status
-  children: React.ReactNode
-}) {
-  return (
-    <div className="px-4 py-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1 basis-60">
-          <h3 className="text-sm font-medium text-ink">{title}</h3>
-          <p className="mt-0.5 text-xs text-ink-muted">{description}</p>
-        </div>
-        <div className="flex flex-wrap gap-2">{children}</div>
-      </div>
-      <StatusLine status={status} />
-    </div>
   )
 }
 
@@ -90,7 +67,10 @@ export function ExportPanel({
   hasApiKey,
   calculator,
   onNeedGraph,
-  onRestore,
+  onImported,
+  onBeforeCapture,
+  collapsible = false,
+  updating = false,
   largeThreshold = 1500,
 }: ExportPanelProps) {
   const [statuses, setStatuses] = useState<Record<ActionId, Status>>({
@@ -99,12 +79,14 @@ export function ExportPanel({
     png: IDLE,
     import: IDLE,
   })
+  const [lastAction, setLastAction] = useState<ActionId>('txt')
   // A request made before the calculator existed; consumed once it appears.
   const pendingRef = useRef<Pending | null>(null)
   const [waiting, setWaiting] = useState(false)
-  const [imported, setImported] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   const importInput = useRef<HTMLInputElement>(null)
   const mounted = useRef(true)
+  const noticeTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   useEffect(() => {
     mounted.current = true
@@ -114,7 +96,15 @@ export function ExportPanel({
   }, [])
 
   const setStatus = useCallback((id: ActionId, status: Status) => {
-    if (mounted.current) setStatuses((prev) => ({ ...prev, [id]: status }))
+    if (!mounted.current) return
+    setLastAction(id)
+    setStatuses((prev) => ({ ...prev, [id]: status }))
+    clearTimeout(noticeTimer.current)
+    if (status.phase === 'success') {
+      noticeTimer.current = setTimeout(() => {
+        if (mounted.current) setStatuses((prev) => ({ ...prev, [id]: IDLE }))
+      }, SUCCESS_NOTICE_MS)
+    }
   }, [])
 
   const hasExpressions = desmos.count > 0
@@ -133,7 +123,7 @@ export function ExportPanel({
       )
       setStatus('txt', {
         phase: 'success',
-        message: `Downloaded ${desmos.count.toLocaleString()} expressions.`,
+        message: `Downloaded ${desmos.count.toLocaleString()} ${desmos.count === 1 ? 'expression' : 'expressions'}.`,
       })
     } catch {
       setStatus('txt', { phase: 'error', message: 'The download could not be started.' })
@@ -144,6 +134,7 @@ export function ExportPanel({
     async (live: DesmosCalculator) => {
       setWaiting(false)
       setStatus('state', { phase: 'working', message: 'Reading the calculator state…' })
+      onBeforeCapture?.()
       await nextFrame()
       try {
         const text = serializeState(live.getState())
@@ -156,13 +147,14 @@ export function ExportPanel({
         setStatus('state', { phase: 'error', message: 'Desmos could not produce its state. Try again.' })
       }
     },
-    [setStatus, sourceName],
+    [setStatus, sourceName, onBeforeCapture],
   )
 
   const runPngExport = useCallback(
     async (live: DesmosCalculator) => {
       setWaiting(false)
       setStatus('png', { phase: 'working', message: 'Rendering the graph…' })
+      onBeforeCapture?.()
       await nextFrame()
       try {
         const dataUrl = await new Promise<string>((resolve, reject) => {
@@ -187,11 +179,11 @@ export function ExportPanel({
           phase: 'error',
           message: timedOut
             ? 'Desmos took too long to render the image. Try a smaller graph.'
-            : 'The screenshot could not be created. Make sure the graph is visible and try again.',
+            : 'The screenshot could not be created. Open the Graph stage and try again.',
         })
       }
     },
-    [setStatus, sourceName],
+    [setStatus, sourceName, onBeforeCapture],
   )
 
   const runImport = useCallback(
@@ -201,19 +193,19 @@ export function ExportPanel({
       await nextFrame()
       try {
         live.setState(job.state, { allowUndo: true })
-        setImported(true)
+        onImported?.(job.state)
         setStatus('import', {
           phase: 'success',
-          message: `Loaded ${job.expressionCount.toLocaleString()} expressions from ${job.name}. This replaces the generated graph until you restore it.`,
+          message: `Loaded ${job.name}.`,
         })
       } catch {
         setStatus('import', {
           phase: 'error',
-          message: 'Desmos rejected this state. It may come from a different calculator version or be damaged.',
+          message: "Desmos couldn't open this file. It may be damaged or come from a different version.",
         })
       }
     },
-    [setStatus],
+    [setStatus, onImported],
   )
 
   // Run an action that was requested before the calculator existed.
@@ -259,117 +251,97 @@ export function ExportPanel({
     request({ kind: 'import', state: parsed.state, name: file.name, expressionCount: parsed.expressionCount })
   }
 
-  const handleRestore = () => {
-    onRestore()
-    setImported(false)
-    setStatus('import', { phase: 'success', message: 'Restored the generated graph.' })
-  }
-
   const blockedReason = !hasApiKey
-    ? 'Needs a Desmos API key (see the Desmos tab).'
+    ? 'State and image exports need the live graph, which is not set up here.'
     : !hasExpressions
       ? 'There are no equations to export yet.'
       : null
 
   return (
-    <section aria-label="Export" className="mt-6 rounded-2xl border border-ink/15 bg-paper-raised">
-      <div className="border-b border-ink/10 px-4 py-3">
-        <h2 className="font-display text-xl text-ink">Export</h2>
-        <p className="mt-0.5 text-xs text-ink-muted">
-          These are files you keep or re-import here. None of them is a Desmos graph link, and Desmos
-          cannot open them directly.
+    <section aria-label="Export" className="flex-none border-t border-line">
+      {collapsible ? (
+        <h2 className="panel-head p-0!">
+          <button
+            type="button"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((open) => !open)}
+            className="flex min-h-11 w-full items-center justify-between px-3 text-left font-semibold outline-offset-[-2px]"
+          >
+            Export
+            <svg viewBox="0 0 12 12" aria-hidden="true" className={`size-3 ${expanded ? 'rotate-180' : ''}`}>
+              <path d="M2 8 6 4l4 4" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            </svg>
+          </button>
+        </h2>
+      ) : (
+        <h2 className="panel-head">Export</h2>
+      )}
+      <div hidden={collapsible && !expanded} className="px-3 pt-2 pb-2.5">
+      {large && (
+        <p className="mb-1.5 text-xs text-ink-muted">
+          {desmos.count.toLocaleString()} expressions, so state and image exports may take a few seconds.
         </p>
-        {large && (
-          <p className="mt-2 text-xs text-vermilion-deep">
-            This graph has {desmos.count.toLocaleString()} expressions, so state and image exports may take a
-            few seconds.
+      )}
+
+      <div className="grid grid-cols-2 gap-1.5">
+        <button type="button" className="btn" disabled={!hasExpressions || updating} onClick={downloadExpressions}>
+          Download expressions
+        </button>
+        <button
+          type="button"
+          className="btn"
+          disabled={calculatorBlocked || busy}
+          onClick={() => request({ kind: 'png' })}
+        >
+          Download PNG
+        </button>
+        <button
+          type="button"
+          className="btn"
+          disabled={calculatorBlocked || busy}
+          onClick={() => request({ kind: 'state' })}
+        >
+          Export state JSON
+        </button>
+        <button
+          type="button"
+          className="btn"
+          disabled={calculatorBlocked || busy}
+          onClick={() => importInput.current?.click()}
+        >
+          Import state JSON
+        </button>
+        <input
+          ref={importInput}
+          type="file"
+          accept="application/json,.json"
+          className="sr-only"
+          tabIndex={-1}
+          aria-label="Choose a Desmos state file"
+          data-testid="import-input"
+          onChange={handleImportFile}
+        />
+      </div>
+
+      {/* One fixed slot, so the buttons never move under the pointer. */}
+      <div className="mt-2 h-8 overflow-hidden text-xs text-ink-muted max-sm:h-auto max-sm:min-h-8">
+        {waiting ? (
+          <p className="flex items-center justify-between gap-3">
+            <span>Waiting for the Desmos graph to finish drawing…</span>
+            <button type="button" onClick={cancelPending} className="btn btn-link">
+              Cancel
+            </button>
+          </p>
+        ) : statuses[lastAction].phase !== 'idle' ? (
+          <StatusLine status={statuses[lastAction]} />
+        ) : (
+          <p>
+            {blockedReason ??
+              'State JSON reopens in this app. It is not a graph link or a native Desmos file.'}
           </p>
         )}
       </div>
-
-      <div className="divide-y divide-ink/10">
-        <Row
-          title="Expressions (.txt)"
-          description="Every equation as Desmos LaTeX, one per line. Paste into a Desmos graph's expression list."
-          status={statuses.txt}
-        >
-          <button type="button" className={buttonClass} disabled={!hasExpressions} onClick={downloadExpressions}>
-            Download expressions
-          </button>
-        </Row>
-
-        <Row
-          title="Desmos state (.json)"
-          description="The calculator's saved state from Desmos getState(). A backup for re-importing into Image2Desmos; it is not a graph link or a native Desmos file."
-          status={statuses.state}
-        >
-          <button
-            type="button"
-            className={buttonClass}
-            disabled={calculatorBlocked || busy}
-            onClick={() => request({ kind: 'state' })}
-          >
-            Export state JSON
-          </button>
-        </Row>
-
-        <Row
-          title="Import state (.json)"
-          description="Load a state file exported above. It is checked before Desmos sees it, and replaces what the graph currently shows."
-          status={statuses.import}
-        >
-          <input
-            ref={importInput}
-            type="file"
-            accept="application/json,.json"
-            className="sr-only"
-            tabIndex={-1}
-            aria-label="Choose a Desmos state file"
-            data-testid="import-input"
-            onChange={handleImportFile}
-          />
-          <button
-            type="button"
-            className={secondaryButtonClass}
-            disabled={calculatorBlocked || busy}
-            onClick={() => importInput.current?.click()}
-          >
-            Import state JSON
-          </button>
-          {imported && (
-            <button type="button" className={secondaryButtonClass} onClick={handleRestore}>
-              Restore generated graph
-            </button>
-          )}
-        </Row>
-
-        <Row
-          title="Graph image (.png)"
-          description="A screenshot of the Desmos graph as currently framed."
-          status={statuses.png}
-        >
-          <button
-            type="button"
-            className={buttonClass}
-            disabled={calculatorBlocked || busy}
-            onClick={() => request({ kind: 'png' })}
-          >
-            Download PNG
-          </button>
-        </Row>
       </div>
-
-      {waiting && (
-        <div className="flex items-center justify-between gap-3 border-t border-ink/10 px-4 py-3 text-xs text-ink-muted">
-          <span>Waiting for the Desmos graph to finish drawing…</span>
-          <button type="button" onClick={cancelPending} className="font-medium text-ink underline underline-offset-4">
-            Cancel
-          </button>
-        </div>
-      )}
-      {blockedReason && (
-        <p className="border-t border-ink/10 px-4 py-3 text-xs text-ink-muted">{blockedReason}</p>
-      )}
     </section>
   )
 }

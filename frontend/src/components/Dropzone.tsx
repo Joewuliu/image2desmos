@@ -1,22 +1,30 @@
-import { useId, useState, type ChangeEvent, type DragEvent } from 'react'
+import { useId, useRef, useState, type ChangeEvent, type DragEvent } from 'react'
 
 interface DropzoneProps {
   onFile: (file: File) => void
   onMultiple: () => void
+  /** Opens a saved Desmos state; left out when the live graph is unavailable. */
+  onSavedState?: (file: File) => void
   error: string | null
 }
 
-export function Dropzone({ onFile, onMultiple, error }: DropzoneProps) {
+export function Dropzone({ onFile, onMultiple, onSavedState, error }: DropzoneProps) {
   const inputId = useId()
   const errorId = useId()
+  const stateInput = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
 
-  const handleDrop = (event: DragEvent<HTMLLabelElement>) => {
+  const take = (file: File) => {
+    if (onSavedState && file.name.toLowerCase().endsWith('.json')) onSavedState(file)
+    else onFile(file)
+  }
+
+  const handleDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
     setDragging(false)
     const files = event.dataTransfer.files
     if (files.length > 1) onMultiple()
-    else if (files.length === 1) onFile(files[0])
+    else if (files.length === 1) take(files[0])
   }
 
   const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -25,74 +33,72 @@ export function Dropzone({ onFile, onMultiple, error }: DropzoneProps) {
     if (file) onFile(file)
   }
 
+  const handleState = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (file) onSavedState?.(file)
+  }
+
   return (
-    <div>
-      <label
-        htmlFor={inputId}
-        onDragOver={(e) => {
-          e.preventDefault()
-          setDragging(true)
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={handleDrop}
-        data-dragging={dragging}
-        className={`group relative flex min-h-80 cursor-pointer flex-col items-center justify-center gap-5 rounded-2xl border-2 border-dashed px-6 py-12 text-center transition-colors focus-within:ring-2 focus-within:ring-vermilion focus-within:ring-offset-2 focus-within:ring-offset-paper ${
-          dragging
-            ? 'border-vermilion bg-vermilion/5'
-            : error
-              ? 'border-vermilion/60 bg-paper-raised hover:border-vermilion'
-              : 'border-ink/25 bg-paper-raised hover:border-ink/60'
-        }`}
-      >
+    <div
+      onDragOver={(e) => {
+        e.preventDefault()
+        setDragging(true)
+      }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={handleDrop}
+      className="graph-ground absolute inset-0 flex flex-col items-center justify-center-safe gap-2 overflow-y-auto p-4 max-sm:gap-0 max-sm:p-2"
+    >
+      <label htmlFor={inputId} data-dragging={dragging} className="block w-full max-w-md cursor-pointer">
         <input
           id={inputId}
           type="file"
           accept="image/png,image/jpeg"
           onChange={handleChange}
           aria-describedby={error ? errorId : undefined}
-          className="sr-only"
+          className="peer sr-only"
         />
-
-        <svg
-          viewBox="0 0 64 64"
-          className={`size-16 transition-transform ${dragging ? 'scale-110 text-vermilion' : 'text-ink/70 group-hover:text-ink'}`}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
+        <span
+          className={`block border px-6 py-7 text-center max-sm:py-3 transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-accent ${
+            dragging
+              ? 'border-accent bg-accent-soft'
+              : `bg-surface ${error ? 'border-danger' : 'border-line-strong'}`
+          }`}
         >
-          <path d="M8 56V8M8 56h48" />
-          <path d="M14 46C22 46 24 18 32 18s10 28 18 28" />
-          <path d="M44 12v14M37 19l7-7 7 7" className="text-vermilion" />
-        </svg>
-
-        <div className="space-y-1.5">
-          <p className="font-display text-2xl text-ink">
+          <span className="block text-lg font-semibold text-ink">
             {dragging ? 'Release to upload' : 'Drop a line drawing here'}
-          </p>
-          <p className="text-sm text-ink-muted">
-            or <span className="font-medium text-ink underline underline-offset-4">browse your files</span>
-          </p>
-        </div>
-
-        <p className="font-mono text-xs tracking-wide text-ink-muted uppercase">
-          PNG or JPEG · up to 10 MB
-        </p>
+          </span>
+          <span className="mt-1 block text-sm text-ink-muted">
+            or <span className="font-medium text-accent underline underline-offset-2">browse your files</span>
+          </span>
+          <span className="mt-3 block text-xs text-ink-muted">PNG or JPEG, up to 10 MB and 25 megapixels</span>
+          <span className="mt-1 block text-xs text-ink-muted">
+            Every stroke is traced with classical computer vision and plain mathematics.
+          </span>
+          {error && (
+            <span id={errorId} role="alert" className="mt-4 block border-t border-line pt-3 text-sm text-danger">
+              {error}
+            </span>
+          )}
+        </span>
       </label>
 
-      {error && (
-        <p
-          id={errorId}
-          role="alert"
-          className="mt-4 flex items-start gap-2.5 rounded-lg border border-vermilion/30 bg-vermilion/8 px-4 py-3 text-sm text-vermilion-deep"
-        >
-          <svg viewBox="0 0 20 20" className="mt-0.5 size-4 shrink-0" fill="currentColor" aria-hidden="true">
-            <path d="M10 2a8 8 0 1 0 0 16 8 8 0 0 0 0-16Zm-.75 4h1.5v5h-1.5V6Zm0 6.5h1.5V14h-1.5v-1.5Z" />
-          </svg>
-          <span>{error}</span>
-        </p>
+      {onSavedState && (
+        <>
+          <input
+            ref={stateInput}
+            type="file"
+            accept="application/json,.json"
+            onChange={handleState}
+            className="sr-only"
+            tabIndex={-1}
+            aria-label="Choose a saved state file"
+            data-testid="saved-state-input"
+          />
+          <button type="button" className="btn btn-link bg-surface" onClick={() => stateInput.current?.click()}>
+            Open a saved state
+          </button>
+        </>
       )}
     </div>
   )

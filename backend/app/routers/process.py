@@ -132,7 +132,9 @@ async def process(
         ),
         desmos=DesmosOut(
             expressions=[
-                ExpressionOut(id=e.id, latex=e.latex, type=e.type, curve=e.curve)
+                ExpressionOut(
+                    id=e.id, latex=e.latex, type=e.type, curve=e.curve, segment=e.segment
+                )
                 for e in graph.expressions
             ],
             count=graph.count,
