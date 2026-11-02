@@ -81,6 +81,7 @@ const processed: ProcessResponse = {
     tolerance: 0.125,
     tolerance_px: 1,
   },
+  desmos: { expressions: [], count: 0, skipped: {}, skipped_count: 0 },
   edge_image: 'data:image/png;base64,AAAA',
   warnings: [],
 }

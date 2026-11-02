@@ -79,6 +79,24 @@ class FitStats(BaseModel):
     tolerance_px: float
 
 
+class ExpressionOut(BaseModel):
+    """One Desmos expression. ``id`` is a valid Desmos expression id."""
+
+    id: str
+    latex: str
+    type: Literal["line", "bezier", "circle"]
+    curve: int
+
+
+class DesmosOut(BaseModel):
+    expressions: list[ExpressionOut]
+    count: int
+    # Segments that could not be written as valid expressions, by reason
+    # ("degenerate" or "invalid_geometry").
+    skipped: dict[str, int]
+    skipped_count: int
+
+
 class ProcessResponse(BaseModel):
     image: ImageMetadata
     params: ProcessingParamsOut
@@ -90,6 +108,7 @@ class ProcessResponse(BaseModel):
     # Fitted curves (lines, circles, cubic Béziers), one entry per stroke.
     curves: list[CurveOut]
     fit: FitStats
+    desmos: DesmosOut
     # PNG data URL: detected edges as dark lines on white.
     edge_image: str
     warnings: list[str]

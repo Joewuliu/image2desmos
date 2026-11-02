@@ -11,10 +11,13 @@ from app.processing.pipeline import (
     edge_map_to_data_url,
     process_image,
 )
+from app.desmos.serializer import serialize_curves
 from app.fitting.types import FittedCurve, Segment
 from app.schemas import (
     BoundsOut,
     CurveOut,
+    DesmosOut,
+    ExpressionOut,
     FitStats,
     ProcessingParamsOut,
     ProcessingStats,
@@ -94,6 +97,7 @@ async def process(
         ) from exc
 
     unit = unit_scale(result.working_width, result.working_height)
+    graph = serialize_curves(result.curves)
     return ProcessResponse(
         image=metadata,
         params=ProcessingParamsOut(**asdict(params)),
@@ -125,6 +129,15 @@ async def process(
             mean_error_px=round(result.fit.mean_error / unit, 3),
             tolerance=round(result.fit_tolerance_units, 6),
             tolerance_px=params.fit_tolerance,
+        ),
+        desmos=DesmosOut(
+            expressions=[
+                ExpressionOut(id=e.id, latex=e.latex, type=e.type, curve=e.curve)
+                for e in graph.expressions
+            ],
+            count=graph.count,
+            skipped=graph.skipped,
+            skipped_count=graph.skipped_count,
         ),
         edge_image=edge_map_to_data_url(result.edge_map),
         warnings=result.warnings,

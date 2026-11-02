@@ -91,6 +91,22 @@ export interface FitStats {
   tolerance_px: number
 }
 
+export interface DesmosExpression {
+  /** Valid Desmos expression id. */
+  id: string
+  latex: string
+  type: 'line' | 'bezier' | 'circle'
+  curve: number
+}
+
+export interface DesmosOutput {
+  expressions: DesmosExpression[]
+  count: number
+  /** Segments that could not be written as valid equations, by reason. */
+  skipped: Record<string, number>
+  skipped_count: number
+}
+
 export interface ProcessResponse {
   image: ImageMetadata
   params: ProcessingParams
@@ -101,6 +117,7 @@ export interface ProcessResponse {
   /** Fitted lines, circles and cubic Béziers, one entry per stroke. */
   curves: Curve[]
   fit: FitStats
+  desmos: DesmosOutput
   /** PNG data URL: detected edges as dark lines on white. */
   edge_image: string
   warnings: string[]

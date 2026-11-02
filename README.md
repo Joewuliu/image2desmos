@@ -13,14 +13,16 @@ The MVP targets black-and-white line art. Color images and photographs come late
 
 - Milestone 4 (curve fitting): contours are fitted with lines, circles and piecewise cubic Bézier curves; a Curves tab previews them over the image.
 
-Desmos integration and export are not implemented yet.
+- Milestone 5 (Desmos): every fitted segment is serialised to a Desmos expression, plotted live in an embedded Desmos Graphing Calculator and listed (with copy) in an Equations tab.
+
+Export and graph-link generation are not implemented yet.
 
 ## Stack
 
 - Frontend: React, TypeScript, Vite, Tailwind CSS, Vitest
 - Backend: Python, FastAPI, pytest
 - Image processing and fitting: OpenCV, NumPy, SciPy, Pillow
-- Planned: Desmos Graphing Calculator API
+- Graph rendering: Desmos Graphing Calculator API (v1.11) Graphing Calculator API
 
 ## Layout
 
@@ -31,6 +33,7 @@ image2desmos/
 │   ├── app/
 │   │   ├── processing/   pure image-processing functions (no web code)
 │   │   ├── fitting/      lines, circles and Bézier fitting (pure NumPy/SciPy)
+│   │   ├── desmos/       fitted segments -> Desmos LaTeX (pure functions)
 │   │   ├── routers/      HTTP endpoints
 │   │   └── services/     upload reading and validation
 │   └── tests/  pytest suite
@@ -112,9 +115,34 @@ Curves are fitted to the dense edge trace, not to the simplified polygons. For e
 
 Segments share end points exactly, so curves have no gaps. `curves[].segments[]` holds `type`, `points` (line: 2 points; Bézier: start, two control points, end) or `center` and `radius` (circle), and `max_error`. `fit` holds the segment counts per type and the maximum and mean error (in units and pixels). Errors are measured against the unsmoothed pixel trace. Fitting uses 65% of `fit_tolerance` to leave room for pixel quantisation, so the reported error normally stays near the requested tolerance. Thick strokes appear as two outlines because Canny finds both edges of a stroke.
 
+### Desmos expressions
+
+`desmos.expressions` lists one expression per fitted segment, in plot order, each with an `id`, `latex`, `type` and source `curve`. Text is deterministic (numbers use at most 5 decimals, no exponents).
+
+| Segment | Expression |
+| --- | --- |
+| line | `\left(3t+1,-4t+2\right)\left\{0\le t\le1\right\}`: start point plus the direction vector times `t`, restricted to `0 <= t <= 1` |
+| cubic Bézier | `\left(-3t^3+5,2t\right)\left\{0\le t\le1\right\}`: the Bernstein form expanded to a polynomial in `t`, restricted to `0 <= t <= 1` |
+| circle | `\left(x-1\right)^2+\left(y+2\right)^2=3^2` |
+
+Segments with zero length or non-finite values are skipped, not emitted. They are counted in `desmos.skipped` and `desmos.skipped_count`.
+
 ### Coordinate system
 
 Contour points are Cartesian: the origin is the image centre, x points right, y points **up** (the image y axis is flipped), and the longest image side spans 20 units (so x is within -10..10 for landscape images). `bounds` gives the exact rectangle the image covers. Fitted curves use the same coordinates.
+
+## Desmos API key
+
+The live graph uses the official Desmos Graphing Calculator API, which needs a key (request one at <https://www.desmos.com/my-api>). Never commit it.
+
+```bash
+cd frontend
+cp .env.example .env.local      # Windows PowerShell: Copy-Item .env.example .env.local
+# edit .env.local and set VITE_DESMOS_API_KEY=your-key
+npm run dev                     # restart so Vite picks up the change
+```
+
+Without a key the Desmos tab explains how to add one; everything else, including the Equations tab and Copy Expressions, still works. Vite embeds `VITE_*` variables in the built JavaScript, so a key used in a deployed build is visible to visitors. Restrict it to your domain in the Desmos dashboard.
 
 ## Configuration
 

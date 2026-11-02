@@ -1,14 +1,18 @@
 import { useState } from 'react'
 import { boundsAspect, curvePathData, polygonPoints, viewBoxFromBounds } from '../lib/geometry'
+import { DesmosGraph } from './DesmosGraph'
+import { EquationsPanel } from './EquationsPanel'
 import type { ImageMetadata, ProcessResponse } from '../lib/types'
 
-type View = 'original' | 'edges' | 'contours' | 'curves'
+type View = 'original' | 'edges' | 'contours' | 'curves' | 'graph' | 'equations'
 
 const TABS: { id: View; label: string }[] = [
   { id: 'original', label: 'Original' },
   { id: 'edges', label: 'Edges' },
   { id: 'contours', label: 'Contours' },
   { id: 'curves', label: 'Curves' },
+  { id: 'graph', label: 'Desmos' },
+  { id: 'equations', label: 'Equations' },
 ]
 
 interface ResultViewerProps {
@@ -30,7 +34,7 @@ export function ResultViewer({ previewUrl, metadata, result, busy }: ResultViewe
 
   return (
     <div>
-      <div role="tablist" aria-label="Preview" className="mb-3 inline-flex rounded-lg border border-ink/15 bg-paper-raised p-1">
+      <div role="tablist" aria-label="Preview" className="mb-3 flex flex-wrap gap-1 rounded-lg border border-ink/15 bg-paper-raised p-1 sm:inline-flex">
         {TABS.map((tab) => {
           const disabled = tab.id !== 'original' && !available
           return (
@@ -51,7 +55,14 @@ export function ResultViewer({ previewUrl, metadata, result, busy }: ResultViewe
         })}
       </div>
 
-      <div className="checkerboard relative flex items-center justify-center overflow-hidden rounded-2xl border border-ink/15 p-3 sm:p-4">
+      {result && view === 'graph' && (
+        <DesmosGraph expressions={result.desmos.expressions} bounds={result.bounds} />
+      )}
+      {result && view === 'equations' && <EquationsPanel desmos={result.desmos} />}
+
+      <div
+        hidden={view === 'graph' || view === 'equations'}
+        className="checkerboard relative flex items-center justify-center overflow-hidden rounded-2xl border border-ink/15 p-3 sm:p-4">
         <div
           className="relative w-full max-w-full"
           style={{ aspectRatio: aspect, maxHeight: '32rem', maxWidth: aspect ? `min(100%, ${32 * aspect}rem)` : undefined }}
