@@ -29,8 +29,8 @@ It is built for black-and-white line art. Color images and photographs are not s
 
 ```
 image2desmos/
-├── frontend/   React + Vite + TypeScript app
-├── backend/    FastAPI service
+├── frontend/   React + Vite + TypeScript app (deployed on Vercel)
+├── backend/    FastAPI service (deployed on Render)
 │   ├── app/
 │   │   ├── processing/   pure image-processing functions (no web code)
 │   │   ├── fitting/      lines, circles and Bézier fitting (pure NumPy/SciPy)
@@ -38,6 +38,7 @@ image2desmos/
 │   │   ├── routers/      HTTP endpoints
 │   │   └── services/     upload reading and validation
 │   └── tests/            pytest suite
+├── render.yaml Render service definition
 ├── DESIGN.md   visual design system
 ├── PRODUCT.md  product context
 ├── README.md
@@ -93,7 +94,7 @@ Other scripts: `npm run build`, `npm run lint`, `npm test`.
 
 ## API
 
-`POST /api/upload` accepts `multipart/form-data` with a single `file` field (PNG or JPEG). The format is detected from the file's contents, not its name or declared type. Limits: 10 MB and 25 megapixels. Uploads are validated in memory and never written to disk. On success it returns image metadata (filename, format, dimensions, pixel count, size, alpha). Errors return `{"detail": {"code": "...", "message": "..."}}` with status 400, 413, 415 or 422.
+`POST /api/upload` accepts `multipart/form-data` with a single `file` field (PNG or JPEG). The format is detected from the file's contents, not its name or declared type. Limits: 10 MB and 25 megapixels. Uploads stay in memory and are never written to disk. On success it returns image metadata (filename, format, dimensions, pixel count, size, alpha). Errors return `{"detail": {"code": "...", "message": "..."}}` with status 400, 413, 415, 422, 500, 503 (busy) or 504 (timed out).
 
 `POST /api/process` takes the same `file` field (same validation and limits) plus optional form fields:
 
@@ -107,7 +108,7 @@ Other scripts: `npm run build`, `npm run lint`, `npm test`.
 
 The pipeline is: decode (transparency onto white) -> grayscale -> downscale to at most 1600 px -> Gaussian blur -> Canny -> `findContours` -> drop specks -> `approxPolyDP` -> Cartesian conversion. It is deterministic: the same input and parameters always give the same output.
 
-The response contains `contours`, `curves`, `fit`, `desmos`, `stats` (contour and point counts, thresholds used), `bounds`, a real `edge_image` (PNG data URL) and `warnings` (for example `no_contours` for a blank image). Images that would produce too much detail (more than 60,000 simplified points, 300,000 traced points or 20,000 segments) are rejected with `too_complex`.
+The response contains `contours`, `curves`, `fit`, `desmos`, `stats` (contour and point counts, thresholds used), `bounds`, a real `edge_image` (PNG data URL) and `warnings` (for example `no_contours` for a blank image). Images that would produce too much detail (more than 60,000 simplified points, 150,000 traced points or 20,000 segments) are rejected with `too_complex`.
 
 ### Curve fitting
 
@@ -174,6 +175,75 @@ Without a key the live graph, state export and import, and PNG download are unav
 
 ## Configuration
 
-The frontend reads the API address from `VITE_API_URL` (default `http://localhost:8001`). To override it, copy `frontend/.env.example` to `frontend/.env.local`.
+### Frontend
 
-The backend allows CORS requests from `http://localhost:5173` and `http://127.0.0.1:5173`. Edit `ALLOWED_ORIGINS` in `backend/app/main.py` to change this. Never commit `.env` files; `.env.*` is ignored, apart from `.env.example`.
+`VITE_*` values are fixed when the frontend is built, so changing one needs a new build. Locally they come from `frontend/.env.local`; copy `frontend/.env.example` to start. `.env.*` files are ignored by Git, apart from `.env.example`.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `VITE_API_URL` | `http://localhost:8001` | Backend address, with no trailing slash. |
+| `VITE_DESMOS_API_KEY` | none | Desmos API key. Without it the live graph is unavailable. |
+
+`npm run build` prints a warning if either is missing.
+
+### Backend
+
+All are optional for local development.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `CORS_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated frontend origins. `*` is refused at startup. |
+| `CORS_ORIGIN_REGEX` | none | Optional pattern for extra origins, such as preview deployments. |
+| `MAX_CONCURRENT_JOBS` | `1` | Traces that run at the same time. |
+| `MAX_QUEUED_JOBS` | `4` | Traces that may wait; beyond this requests get 503. |
+| `JOB_QUEUE_SECONDS` | `30` | Longest wait for a free slot. |
+| `JOB_TIMEOUT_SECONDS` | `60` | Longest a trace may run before it gets 504. |
+
+## Deployment
+
+The frontend is a static build on Vercel and the backend is a web service on Render. Deploy the backend first, because the frontend build needs its address.
+
+### 1. Render (backend)
+
+`render.yaml` defines the service, including Python 3.13.15, the start command and the `/health` check.
+
+1. In the Render Dashboard choose **New > Blueprint** and connect the repository.
+2. When asked for `CORS_ORIGINS`, enter a placeholder such as `https://example.com`; step 3 sets the real value.
+3. Apply the Blueprint, wait for the deploy, and copy the service URL, such as `https://image2desmos-api.onrender.com`.
+4. Open `<service URL>/health`. It should return `{"status":"ok"}`.
+
+To create it by hand instead, make a **Web Service** with these settings:
+
+| Setting | Value |
+| --- | --- |
+| Runtime | Python 3 |
+| Root Directory | `backend` |
+| Build Command | `pip install -r requirements.txt` |
+| Start Command | `uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --limit-concurrency 12` |
+| Health Check Path | `/health` |
+| Environment | `PYTHON_VERSION=3.13.15`, `CORS_ORIGINS`, `OMP_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`, `MALLOC_ARENA_MAX=2` |
+
+### 2. Vercel (frontend)
+
+1. In Vercel choose **Add New > Project** and import the repository.
+2. Set **Root Directory** to `frontend`. Vercel detects Vite, so the build settings can stay as they are: `npm run build`, output `dist`. No `vercel.json` is needed, because the app is a single page with no client-side routes.
+3. Add these environment variables for Production and Preview:
+   - `VITE_API_URL`: the Render service URL, with no trailing slash
+   - `VITE_DESMOS_API_KEY`: your Desmos key
+4. Deploy, and copy the production URL, such as `https://image2desmos.vercel.app`.
+
+### 3. Connect them
+
+1. In Render, set `CORS_ORIGINS` to the exact Vercel URL, with `https://` and no trailing slash. Add any custom domain after a comma. Saving restarts the service.
+2. To allow Vercel preview deployments, also set `CORS_ORIGIN_REGEX`, for example `https://image2desmos-.*\.vercel\.app`. Keep the pattern specific to your project.
+3. In your Desmos dashboard, restrict the key to your domain. It is embedded in the built JavaScript, so visitors can see it. Trial keys show a notice and are not for commercial use.
+
+If you later change `VITE_API_URL` or `VITE_DESMOS_API_KEY`, redeploy on Vercel so a new build picks it up. Changes to `render.yaml` environment values marked `sync: false` are not applied from the file; edit those in the Render Dashboard.
+
+### Running on the free plan
+
+- The free plan has 0.1 CPU and 512 MB of memory, and it spins down after 15 minutes without traffic. The first request after that can take about a minute.
+- The service runs one trace at a time. Others wait in a short queue, and when it is full users see a "busy" message with their work intact.
+- Peak memory for a worst-case 25-megapixel image was about 300 MB when measured on Windows. The real figure on Render may differ, so check the service's metrics after deploying.
+- Requests are capped at 10 MB, refused before they are parsed. Images are shrunk while decoding, and traces stop at their time limit. There is no per-visitor rate limit.
+- Traces take longer at 0.1 CPU. If `504` responses become common, raise `JOB_TIMEOUT_SECONDS` or move to a larger plan and raise `MAX_CONCURRENT_JOBS`.

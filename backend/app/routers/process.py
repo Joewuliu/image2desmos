@@ -1,12 +1,14 @@
 from dataclasses import asdict
 from typing import Annotated
 
-from fastapi import APIRouter, Form, UploadFile
+from fastapi import APIRouter, Form, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 
+from app import config
 from app.processing import params as p
 from app.processing.coordinates import unit_scale
 from app.processing.pipeline import (
+    ProcessingDeadlineError,
     TooComplexError,
     edge_map_to_data_url,
     process_image,
@@ -19,17 +21,25 @@ from app.schemas import (
     DesmosOut,
     ExpressionOut,
     FitStats,
+    ImageMetadata,
     ProcessingParamsOut,
     ProcessingStats,
     ProcessResponse,
     SegmentOut,
 )
 from app.services.image_validation import ImageValidationError, validate_image
+from app.services.job_limiter import JobLimiter, JobTimeoutError
 from app.services.upload_reader import read_limited
 
 router = APIRouter(prefix="/api", tags=["process"])
 
 _defaults = p.ProcessingParams()
+job_limiter = JobLimiter(
+    config.MAX_CONCURRENT_JOBS,
+    config.MAX_QUEUED_JOBS,
+    config.JOB_QUEUE_SECONDS,
+    config.JOB_TIMEOUT_SECONDS,
+)
 COORD_DECIMALS = 4
 
 
@@ -58,6 +68,7 @@ def _curve_out(curve: FittedCurve) -> CurveOut:
 
 @router.post("/process", response_model=ProcessResponse)
 async def process(
+    request: Request,
     file: UploadFile,
     blur_sigma: Annotated[
         float, Form(ge=p.BLUR_SIGMA_RANGE[0], le=p.BLUR_SIGMA_RANGE[1])
@@ -80,13 +91,23 @@ async def process(
     Uses the same validation and limits as ``/api/upload``. Nothing is stored.
     """
     data = await read_limited(file)
-    metadata = validate_image(data, file.filename)
+    metadata = await run_in_threadpool(validate_image, data, file.filename)
     params = p.ProcessingParams(
         blur_sigma, edge_sensitivity, simplify, fit_tolerance, min_contour_size
     )
 
+    # Building the response is real work too, so it stays inside the job.
+    def job(deadline: float) -> ProcessResponse:
+        return _trace(data, metadata, params, deadline)
+
+    return await job_limiter.run(job, request.is_disconnected)
+
+
+def _trace(
+    data: bytes, metadata: ImageMetadata, params: p.ProcessingParams, deadline: float
+) -> ProcessResponse:
     try:
-        result = await run_in_threadpool(process_image, data, params)
+        result = process_image(data, params, deadline)
     except TooComplexError as exc:
         raise ImageValidationError(
             "too_complex",
@@ -94,6 +115,13 @@ async def process(
             "sensitivity, increase blur, simplification or minimum contour size, "
             "or use cleaner line art.",
             422,
+        ) from exc
+    except ProcessingDeadlineError as exc:
+        raise JobTimeoutError from exc
+    except OSError as exc:
+        # JPEG validation only reads headers, so damaged pixel data surfaces here.
+        raise ImageValidationError(
+            "corrupt_image", "The image file appears to be corrupt."
         ) from exc
 
     unit = unit_scale(result.working_width, result.working_height)

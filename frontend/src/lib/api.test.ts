@@ -27,6 +27,47 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+describe('request timeout', () => {
+  it('gives up on a server that never answers, with a plain message', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn((_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () =>
+              reject(new DOMException('Aborted', 'AbortError')),
+            )
+          }),
+        ),
+      )
+      const pending = uploadImage(file)
+      const outcome = expect(pending).rejects.toMatchObject({ code: 'timeout' })
+      await vi.advanceTimersByTimeAsync(180_000)
+      await outcome
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('still lets a caller cancel', async () => {
+    const controller = new AbortController()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () =>
+            reject(new DOMException('Aborted', 'AbortError')),
+          )
+        }),
+      ),
+    )
+    const pending = uploadImage(file, controller.signal)
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+  })
+})
+
 describe('uploadImage', () => {
   it('posts multipart form data to /api/upload and returns metadata', async () => {
     const fetchMock = mockFetch(Response.json(metadata))

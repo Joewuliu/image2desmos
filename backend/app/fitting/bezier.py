@@ -8,6 +8,8 @@ values with Newton-Raphson; if that is not enough, split at the worst point
 
 import numpy as np
 
+from collections.abc import Callable
+
 from app.fitting.types import Array
 
 _MAX_REPARAM_ITERATIONS = 6
@@ -98,18 +100,25 @@ def _worst_point(ctrl: Array, pts: Array, u: Array) -> tuple[float, int]:
 
 
 def fit_cubic(
-    pts: Array, t1: Array, t2: Array, tolerance: float
+    pts: Array,
+    t1: Array,
+    t2: Array,
+    tolerance: float,
+    progress: Callable[[int], None] | None = None,
 ) -> list[tuple[Array, int, int]]:
     """Fit ``pts`` with as few cubics as needed.
 
     Returns ``(control_points, first_index, last_index)`` for each cubic, in
     order; consecutive cubics share their boundary index and end point.
+    ``progress`` hears the count of finished cubics and may raise to stop early.
     """
     result: list[tuple[Array, int, int]] = []
     # Explicit stack (rather than recursion) keeps deep splits safe. Entries
     # are pushed right-then-left so pieces pop in order.
     stack: list[tuple[int, int, Array, Array]] = [(0, len(pts) - 1, t1, t2)]
     while stack:
+        if progress is not None:
+            progress(len(result))
         lo, hi, left_tangent, right_tangent = stack.pop()
         piece = pts[lo : hi + 1]
 

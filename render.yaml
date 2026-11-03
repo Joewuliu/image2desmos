@@ -1,0 +1,25 @@
+# Backend web service on Render. The frontend is deployed separately on Vercel.
+services:
+  - type: web
+    name: image2desmos-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    # Uploads stay in memory, so open connections are capped to keep them under 512 MB.
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --limit-concurrency 12
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.15
+      # Exact frontend origin, for example https://image2desmos.vercel.app
+      - key: CORS_ORIGINS
+        sync: false
+      # One thread per job: the free plan has 0.1 CPU, and extra numeric threads only use memory.
+      - key: OMP_NUM_THREADS
+        value: "1"
+      - key: OPENBLAS_NUM_THREADS
+        value: "1"
+      # Fewer allocator arenas, so a large image's memory is handed back sooner.
+      - key: MALLOC_ARENA_MAX
+        value: "2"

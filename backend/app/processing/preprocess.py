@@ -6,11 +6,41 @@ from io import BytesIO
 import cv2
 import numpy as np
 from numpy.typing import NDArray
-from PIL import Image, ImageOps
+from PIL import Image
 
 from app.processing.params import WORKING_MAX_DIM
 
 GrayImage = NDArray[np.uint8]
+
+_ORIENTATION_TAG = 0x0112
+_EXIF_ORIENTATION: dict[int, Image.Transpose] = {
+    2: Image.Transpose.FLIP_LEFT_RIGHT,
+    3: Image.Transpose.ROTATE_180,
+    4: Image.Transpose.FLIP_TOP_BOTTOM,
+    5: Image.Transpose.TRANSPOSE,
+    6: Image.Transpose.ROTATE_270,
+    7: Image.Transpose.TRANSVERSE,
+    8: Image.Transpose.ROTATE_90,
+}
+
+
+def _transposition(image: Image.Image) -> Image.Transpose | None:
+    return _EXIF_ORIENTATION.get(image.getexif().get(_ORIENTATION_TAG, 1))
+
+
+def _to_gray(image: Image.Image) -> Image.Image:
+    """Flatten to 8-bit gray, compositing any transparency onto white.
+
+    Works one channel at a time: a 25 MP RGBA image would otherwise need
+    several 100 MB copies, more than a small server has.
+    """
+    has_alpha = image.mode in ("RGBA", "LA", "PA") or "transparency" in image.info
+    if not has_alpha:
+        return image.convert("L")
+    rgba = image if image.mode in ("RGBA", "LA") else image.convert("RGBA")
+    gray = Image.new("L", rgba.size, 255)
+    gray.paste(rgba.convert("L"), mask=rgba.getchannel("A"))
+    return gray
 
 
 def decode_to_gray(data: bytes) -> GrayImage:
@@ -18,15 +48,22 @@ def decode_to_gray(data: bytes) -> GrayImage:
 
     EXIF orientation is applied so the result matches what a browser shows,
     and transparency is composited onto white (typical for line art PNGs).
+    Images far larger than the working size are shrunk while decoding, because
+    the full-size pixels are never used and memory is what limits a public server.
     """
     with Image.open(BytesIO(data)) as raw:
-        img = ImageOps.exif_transpose(raw)
-        if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
-            rgba = img.convert("RGBA")
-            background = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
-            img = Image.alpha_composite(background, rgba)
-        gray = img.convert("L")
-        return np.asarray(gray, dtype=np.uint8).copy()
+        oversized = max(raw.size) >= 2 * WORKING_MAX_DIM
+        if oversized:
+            raw.draft("L", (2 * WORKING_MAX_DIM, 2 * WORKING_MAX_DIM))  # JPEG only
+        raw.load()
+        transposition = _transposition(raw)
+        gray = _to_gray(raw)
+    factor = max(gray.size) // WORKING_MAX_DIM
+    if factor >= 2:
+        gray = gray.reduce(factor)
+    if transposition is not None:
+        gray = gray.transpose(transposition)
+    return np.asarray(gray, dtype=np.uint8).copy()
 
 
 def limit_size(gray: GrayImage, max_dim: int = WORKING_MAX_DIM) -> GrayImage:

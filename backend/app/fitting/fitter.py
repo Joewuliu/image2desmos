@@ -9,6 +9,8 @@ Strategy for each stroke:
 Every piece shares its end points with its neighbours, so curves have no gaps.
 """
 
+from collections.abc import Callable
+
 import numpy as np
 from scipy.ndimage import gaussian_filter1d
 
@@ -88,6 +90,7 @@ def _fit_piece(
     window: float,
     t_start: Array | None,
     t_end: Array | None,
+    progress: Callable[[int], None] | None = None,
 ) -> list[Segment]:
     """Fit one corner-free run of smoothed points ``piece``.
 
@@ -101,7 +104,7 @@ def _fit_piece(
     t1 = t_start if t_start is not None else _tangent_forward(piece, window)
     t2 = t_end if t_end is not None else _tangent_backward(piece, window)
     segments: list[Segment] = []
-    for ctrl, lo, hi in fit_cubic(piece, t1, t2, tolerance):
+    for ctrl, lo, hi in fit_cubic(piece, t1, t2, tolerance, progress):
         segments.append(_bezier_segment(ctrl, raw[lo : hi + 1]))
     return segments
 
@@ -144,6 +147,7 @@ def fit_stroke(
     window: float,
     allow_circles: bool = True,
     circle_tolerance: float | None = None,
+    progress: Callable[[int], None] | None = None,
 ) -> FittedCurve:
     """Fit one stroke.
 
@@ -153,6 +157,8 @@ def fit_stroke(
     circle_tolerance: maximum radial error for accepting a circle; defaults to
         ``tolerance``. Circles are judged against the raw points, so callers that
         shrink ``tolerance`` to allow for pixel jitter can pass the full value.
+    progress: called during long fits with a running segment count; may raise
+        to stop the fit.
     """
     raw = _dedupe(points, closed)
     source = len(raw)
@@ -161,7 +167,7 @@ def fit_stroke(
 
     def piece_of(lo: int, hi: int, t1: Array | None = None, t2: Array | None = None) -> list[Segment]:
         raw_piece = _slice(raw, lo, hi)
-        return _fit_piece(_smooth(raw_piece, False), raw_piece, tolerance, window, t1, t2)
+        return _fit_piece(_smooth(raw_piece, False), raw_piece, tolerance, window, t1, t2, progress)
 
     # Corners are found on the unsmoothed trace so smoothing never moves them.
     if not closed:
@@ -197,10 +203,16 @@ def fit_stroke(
             behind = np.roll(pts[::-1], -(source - 1 - c), axis=0)
             tangents.append(unit(_tangent_forward(ahead, window) - _tangent_forward(behind, window)))
         segments += _fit_piece(
-            pts[: half + 1], raw[: half + 1], tolerance, window, tangents[0], -tangents[1]
+            pts[: half + 1], raw[: half + 1], tolerance, window, tangents[0], -tangents[1], progress
         )
         segments += _fit_piece(
-            _slice(pts, half, 0), _slice(raw, half, 0), tolerance, window, tangents[1], -tangents[0]
+            _slice(pts, half, 0),
+            _slice(raw, half, 0),
+            tolerance,
+            window,
+            tangents[1],
+            -tangents[0],
+            progress,
         )
     return FittedCurve(True, segments, source)
 

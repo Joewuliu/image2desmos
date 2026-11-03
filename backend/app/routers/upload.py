@@ -1,4 +1,5 @@
 from fastapi import APIRouter, UploadFile
+from fastapi.concurrency import run_in_threadpool
 
 from app.schemas import ImageMetadata
 from app.services.image_validation import validate_image
@@ -15,4 +16,4 @@ async def upload_image(file: UploadFile) -> ImageMetadata:
     never written to disk.
     """
     data = await read_limited(file)
-    return validate_image(data, file.filename)
+    return await run_in_threadpool(validate_image, data, file.filename)

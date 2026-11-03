@@ -167,3 +167,60 @@ def test_filter_drops_tiny_specks() -> None:
     assert contour_ops.filter_and_simplify([speck], 0.0, 400, 400) == []
     big = np.array([[10, 10], [60, 10], [60, 60], [10, 60]], dtype=np.int32)
     assert len(contour_ops.filter_and_simplify([big], 0.0, 200, 200)) == 1
+
+
+def _encode(mode: str, size: tuple[int, int], fmt: str, **save) -> bytes:
+    from io import BytesIO
+
+    from PIL import Image
+
+    buf = BytesIO()
+    Image.new(mode, size, "white").save(buf, format=fmt, **save)
+    return buf.getvalue()
+
+
+def test_exif_orientation_is_applied() -> None:
+    from PIL import Image
+
+    exif = Image.Exif()
+    exif[0x0112] = 6  # rotate 90 degrees
+    data = _encode("RGB", (40, 20), "JPEG", exif=exif)
+    assert preprocess.decode_to_gray(data).shape == (40, 20)
+
+
+def test_oversized_images_are_shrunk_while_decoding() -> None:
+    for mode, fmt in (("RGB", "JPEG"), ("RGBA", "PNG"), ("L", "PNG")):
+        gray = preprocess.decode_to_gray(_encode(mode, (4900, 3300), fmt))
+        assert 1600 <= max(gray.shape) < 3300
+        assert gray.shape[1] > gray.shape[0]  # keeps its shape
+
+
+def test_oversized_image_keeps_its_orientation() -> None:
+    from PIL import Image
+
+    exif = Image.Exif()
+    exif[0x0112] = 6
+    gray = preprocess.decode_to_gray(_encode("RGB", (4800, 1000), "JPEG", exif=exif))
+    assert gray.shape[0] > gray.shape[1]
+
+
+def test_transparent_ink_is_composited_correctly() -> None:
+    from io import BytesIO
+
+    from PIL import Image
+
+    img = Image.new("RGBA", (20, 20), (0, 0, 0, 0))
+    img.paste((0, 0, 0, 255), (5, 5, 15, 15))
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    gray = preprocess.decode_to_gray(buf.getvalue())
+    assert gray[10, 10] == 0 and gray[0, 0] == 255
+
+
+def test_noise_is_refused_before_any_fitting() -> None:
+    import time
+
+    started = time.perf_counter()
+    with pytest.raises(TooComplexError):
+        process_gray(synthetic.noise(1600), ProcessingParams())
+    assert time.perf_counter() - started < 10

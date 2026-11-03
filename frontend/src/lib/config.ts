@@ -4,6 +4,12 @@ export const API_URL: string = (
 
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
+/**
+ * Longer than the server's queue and trace limits combined, plus the minute a
+ * sleeping free-tier server can take to start.
+ */
+export const REQUEST_TIMEOUT_MS = 180_000
+
 export const ACCEPTED_TYPES: readonly string[] = ['image/png', 'image/jpeg']
 
 /**

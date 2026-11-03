@@ -1,6 +1,7 @@
 """Orchestrates the deterministic image -> contours pipeline."""
 
 import base64
+import time
 from dataclasses import dataclass, field
 
 import cv2
@@ -31,6 +32,15 @@ class TooComplexError(Exception):
         self.limit = limit
 
 
+class ProcessingDeadlineError(Exception):
+    """The job ran past its time limit and stopped between steps."""
+
+
+def _check_deadline(deadline: float | None) -> None:
+    if deadline is not None and time.monotonic() > deadline:
+        raise ProcessingDeadlineError
+
+
 @dataclass(frozen=True)
 class ProcessingResult:
     contours: list[NDArray[np.float64]]  # Cartesian (x, y) per contour
@@ -57,7 +67,9 @@ class ProcessingResult:
         return sum(len(c) for c in self.contours)
 
 
-def process_gray(gray: NDArray[np.uint8], params: ProcessingParams) -> ProcessingResult:
+def process_gray(
+    gray: NDArray[np.uint8], params: ProcessingParams, deadline: float | None = None
+) -> ProcessingResult:
     """Run blur -> Canny -> contours -> simplification -> Cartesian conversion."""
     working = preprocess.limit_size(gray)
     height, width = working.shape
@@ -78,10 +90,9 @@ def process_gray(gray: NDArray[np.uint8], params: ProcessingParams) -> Processin
     if not simplified:
         warnings.append("no_contours")
 
-    curves = _fit_curves(raw, params, width, height)
+    _check_deadline(deadline)
+    curves = _fit_curves(raw, params, width, height, deadline)
     fit = summarize(curves)
-    if fit.segment_count > MAX_SEGMENTS:
-        raise TooComplexError(fit.segment_count, MAX_SEGMENTS)
     if not curves and "no_contours" not in warnings:
         warnings.append("no_curves")
 
@@ -104,7 +115,11 @@ def process_gray(gray: NDArray[np.uint8], params: ProcessingParams) -> Processin
 
 
 def _fit_curves(
-    raw: list[contour_ops.PixelContour], params: ProcessingParams, width: int, height: int
+    raw: list[contour_ops.PixelContour],
+    params: ProcessingParams,
+    width: int,
+    height: int,
+    deadline: float | None = None,
 ) -> list[FittedCurve]:
     """Fit lines, circles and Béziers to the dense (unsimplified) edge traces."""
     longest = max(width, height)
@@ -112,6 +127,7 @@ def _fit_curves(
 
     kept: list[tuple[strokes.PixelPoints, bool]] = []
     for contour in raw:
+        _check_deadline(deadline)
         for pts, closed in strokes.contour_to_strokes(contour):
             if strokes.stroke_extent(pts) >= max(min_extent, 1.0):
                 kept.append((pts, closed))
@@ -125,16 +141,30 @@ def _fit_curves(
     tolerance = full_tolerance * FIT_JITTER_HEADROOM
     window = max(FIT_WINDOW_MIN_PX, FIT_WINDOW_FRACTION * longest) * scale
     curves = []
+    segments = 0
+
+    def check(fitting: int) -> None:
+        _check_deadline(deadline)
+        if segments + fitting > MAX_SEGMENTS:
+            raise TooComplexError(segments + fitting, MAX_SEGMENTS)
+
     for pts, closed in kept:
+        _check_deadline(deadline)
         cartesian = coordinates.image_to_cartesian(pts, width, height)
-        curve = fit_stroke(cartesian, closed, tolerance, window, circle_tolerance=full_tolerance)
+        curve = fit_stroke(
+            cartesian, closed, tolerance, window, circle_tolerance=full_tolerance, progress=check
+        )
         if curve.segments:
             curves.append(curve)
+            segments += len(curve.segments)
+            check(0)
     return curves
 
 
-def process_image(data: bytes, params: ProcessingParams) -> ProcessingResult:
-    return process_gray(preprocess.decode_to_gray(data), params)
+def process_image(
+    data: bytes, params: ProcessingParams, deadline: float | None = None
+) -> ProcessingResult:
+    return process_gray(preprocess.decode_to_gray(data), params, deadline)
 
 
 def edge_map_to_data_url(edge_map: NDArray[np.uint8]) -> str:

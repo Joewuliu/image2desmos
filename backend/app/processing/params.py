@@ -26,7 +26,7 @@ FIT_TOLERANCE_RANGE: tuple[float, float] = (0.5, 5.0)
 MIN_CONTOUR_SIZE_RANGE: tuple[float, float] = (0.0, 20.0)
 
 # Upper bounds that keep fitting time and response size reasonable.
-MAX_FIT_POINTS: int = 300_000
+MAX_FIT_POINTS: int = 150_000
 MAX_SEGMENTS: int = 20_000
 
 # Edge traces are quantised to whole pixels (about half a pixel of jitter), and
